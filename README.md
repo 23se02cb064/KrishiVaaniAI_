@@ -15,7 +15,7 @@ Smart Farming Insights for Indian Farmers
   </a>
 </p>
 
-Other SCREENSHOTS of my Project
+## 📸 Screenshots
 
 ![Screenshot 2025-06-25 200033](https://github.com/user-attachments/assets/f9fb467b-0d06-4316-b95b-c3a94741420c)
 
@@ -79,8 +79,10 @@ python app.py
 ---
 
 ## Credits
+- Core Development: **Ankan Basu**, **Ankit Basu**
 - Background images: see `/images`
 - Font: Press Start 2P (Google Fonts)
+
 
 ---
 
