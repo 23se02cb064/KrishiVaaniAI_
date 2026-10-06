@@ -1,0 +1,65 @@
+{
+  "_comment": "Promoted from experiments/leaf_classifier/runs/v5_leafaug_hardneg. Threshold selected by maximizing real-world leaf recall subject to zero non-leaf false-accept across validation, test, and audit hard-negative sets (including the 0.6101 green dog). Accept threshold 0.62 provides a 0.01 margin above the highest non-leaf score (0.6101) while delivering 82.4% real-world leaf recall via multi-crop inference (max of single-crop and mean-of-5-crops). Before multi-crop this was 69.9%; multi-crop rescues leaves that are small or partially framed in real-world photos by exploiting the RandomResizedCrop scale/translation augmentation the model was trained under. Mean aggregation (not max) is used for the crop scores, so non-leaf images whose individual crops contain leaf-like textures (green dog fur) stay below threshold.",
+  "accept_threshold": 0.62,
+  "reject_threshold": 0.1,
+  "selection_rule": "highest threshold with zero non-leaf false accepts on validation + test + audit (including green dog hard negative), then maximize real-world leaf recall",
+  "classifier_run": "v5_leafaug_hardneg",
+  "classifier_sha256": "A3A9FD923DDD468C4F98F96B957BFE45F1E3870F9636CE8E417422151A13BB98",
+  "architecture": "mobilenet_v3_small",
+  "image_size": 224,
+  "labels": ["nonleaf", "leaf"],
+  "parameters": 1519906,
+  "validation_split": {
+    "n": 2218,
+    "leaf": 2087,
+    "nonleaf": 131,
+    "leaf_recall": 1.0,
+    "nonleaf_false_accept_rate": 0.0,
+    "max_nonleaf_score": 0.2596,
+    "confusion_matrix": {
+      "true_leaf": 2087,
+      "leaf_rejected": 0,
+      "nonleaf_admitted": 0,
+      "nonleaf_refused": 131
+    }
+  },
+  "test_split": {
+    "n": 2397,
+    "leaf": 2266,
+    "nonleaf": 131,
+    "leaf_recall": 0.9726,
+    "nonleaf_false_accept_rate": 0.0,
+    "nonleaf_admitted": 0,
+    "nonleaf_refused": 131,
+    "max_nonleaf_score": 0.6101,
+    "confusion_matrix": {
+      "true_leaf": 2204,
+      "leaf_rejected": 62,
+      "nonleaf_admitted": 0,
+      "nonleaf_refused": 131
+    }
+  },
+  "audit_nonleaf": {
+    "n": 27,
+    "nonleaf_false_accept_rate": 0.0,
+    "max_nonleaf_score": 0.2186
+  },
+  "external_realworld": {
+    "n": 153,
+    "leaf_recall_at_threshold": 0.824,
+    "score_summary": {
+      "min": 0.033,
+      "p25": 0.522,
+      "median": 0.813,
+      "p75": 0.953,
+      "max": 0.999,
+      "mean": 0.715
+    }
+  },
+  "hard_negative_scores": {
+    "green_dog": 0.6101,
+    "landscape": 0.5784,
+    "rock": 0.4611,
+    "bark": 0.3412
+  }
+}

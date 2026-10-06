@@ -1,0 +1,27 @@
+{
+  "generated": "2026-10-05 16:50 (recalibrated by audit; see audit/AUDIT_REPORT.md)",
+  "model_sha256": "9A6B3EB1F3D48FB34831E13C840A6D09E481A6D7588807390661DF74BC5FB850",
+  "prototypes": "leaf_prototypes.npz",
+  "weights": {
+    "vegetation": 0.6,
+    "feature": 0.1,
+    "coherence": 0.0,
+    "detail": 0.3
+  },
+  "accept_threshold": 0.9,
+  "reject_threshold": 0.05,
+  "distance_lo": 0.34,
+  "distance_hi": 0.16,
+  "neighbours": 5,
+  "quality_rules": {
+    "min_side_px": 64,
+    "min_pixels": 4096,
+    "min_sharpness": 8.0,
+    "min_subject_mean_luma": 0.1,
+    "max_subject_mean_luma": 0.95,
+    "max_subject_clipped_fraction": 0.55,
+    "max_flat_fraction": 0.92
+  },
+  "prefilter_reject_threshold": 0.05,
+  "threshold_rule": "Recalibrated 2026-10-05 against 456 studio leaves, 153 real-world non-studio leaves and 27 non-leaf photographs. The previous configuration weighted coherence 0.3 and detail 0.35 with feature at 0.0, and admitted 17 of 27 non-leaf photographs with a confident disease class, because coherence scores how peaked the disease posterior is and so is 1.0 for a confidently wrong prediction, while detail is 1.0 for nearly any photograph: an image with no vegetation scored 0.3*1 + 0.35*1 = 0.65, landing on the accept boundary. accept_threshold 0.9 is the highest value admitting none of the 27 non-leaf images. reject_threshold 0.05 sits below the weakest genuine leaf measured (0.0793). Updated 2026-10-06: added detail=0.3 to prefilter scoring so non-green leaves (cherry on white, blueberry, diseased apple) are no longer rejected before reaching the classifier. Non-leaf images passing the prefilter are still caught by the classifier (max non-leaf score 0.610 below the 0.62 accept threshold)."
+}
