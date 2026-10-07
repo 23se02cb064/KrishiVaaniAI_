@@ -1,5 +1,5 @@
 {
-  "_comment": "Promoted from experiments/leaf_classifier/runs/v5_leafaug_hardneg. Threshold selected by maximizing real-world leaf recall subject to zero non-leaf false-accept across validation, test, and audit hard-negative sets (including the 0.6101 green dog). Accept threshold 0.62 provides a 0.01 margin above the highest non-leaf score (0.6101) while delivering 82.4% real-world leaf recall via multi-crop inference (max of single-crop and mean-of-5-crops). Before multi-crop this was 69.9%; multi-crop rescues leaves that are small or partially framed in real-world photos by exploiting the RandomResizedCrop scale/translation augmentation the model was trained under. Mean aggregation (not max) is used for the crop scores, so non-leaf images whose individual crops contain leaf-like textures (green dog fur) stay below threshold.",
+  "_comment": "Promoted from experiments/leaf_classifier/runs/v5_leafaug_hardneg. Threshold selected by maximizing real-world leaf recall subject to zero non-leaf false-accept across validation, test, and audit hard-negative sets (including the 0.6101 green dog). Accept threshold 0.62 provides a 0.01 margin above the highest non-leaf score (0.6101) while delivering 85.6% real-world leaf recall via multi-crop inference (three-way max: max of single-crop-stretch, single-crop-preserve-aspect, and mean-of-5-crops). Before multi-crop this was 69.9%; multi-crop rescues leaves that are small or partially framed in real-world photos by exploiting the RandomResizedCrop scale/translation augmentation the model was trained under. Mean aggregation (not max) is used for the crop scores, so non-leaf images whose individual crops contain leaf-like textures (green dog fur) stay below threshold. The three-way max adds an aspect-preserving single-crop that matches the disease model preprocessing (Resize 256 + CenterCrop 224), rescuing leaves in high-aspect-ratio images without admitting the green dog (0.610).",
   "accept_threshold": 0.62,
   "reject_threshold": 0.1,
   "selection_rule": "highest threshold with zero non-leaf false accepts on validation + test + audit (including green dog hard negative), then maximize real-world leaf recall",
@@ -46,7 +46,7 @@
   },
   "external_realworld": {
     "n": 153,
-    "leaf_recall_at_threshold": 0.824,
+    "leaf_recall_at_threshold": 0.856,
     "score_summary": {
       "min": 0.033,
       "p25": 0.522,
