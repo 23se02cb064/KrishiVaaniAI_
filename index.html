@@ -2,245 +2,588 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KrishiVaani AI</title>
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Pixel Font -->
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <!-- Favicon -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#22c55e">
+  <meta name="description" content="AI-powered crop disease detection, weather forecast, and AI assistant for Indian farmers">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="CH AI">
+  <title>CH AI</title>
+  <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/images/Screenshot 2025-06-25 121137.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Poppins', 'system-ui', 'sans-serif'] },
+          colors: {
+            primary: { DEFAULT: '#22c55e', dark: '#16a34a', light: '#4ade80' },
+            surface: { DEFAULT: '#ffffff', alt: '#f8fafc' },
+            ink: { DEFAULT: '#1f2937', muted: '#6b7280', light: '#9ca3af' },
+            border: '#e5e7eb',
+          }
+        }
+      }
+    }
+  </script>
   <style>
+    :root {
+      --primary: #22c55e;
+      --primary-dark: #16a34a;
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --ink: #1f2937;
+      --ink-muted: #6b7280;
+      --border: #e5e7eb;
+      --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
+
     body {
-      font-family: 'Press Start 2P', monospace;
-      background: url('/static/images/pixel-art-retro-videogame-landscape-background-combine-harvester-wheat-field-300530648.webp') center center/cover no-repeat fixed;
-      /* Replace bg1.png with the actual image you want as background */
+      font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--ink);
       min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Subtle background decoration */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        linear-gradient(135deg, rgba(34,197,94,0.06) 0%, rgba(22,163,74,0.04) 50%, transparent 100%),
+        url('/static/images/pixel-art-retro-videogame-landscape-background-combine-harvester-wheat-field-300530648.webp') center center / cover no-repeat fixed;
+      opacity: 0.35;
+      z-index: -1;
+      pointer-events: none;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    @media (min-width: 768px) {
+      .app-shell { padding: 24px; }
+    }
+
+    @media (min-width: 1024px) {
+      .app-shell { padding: 32px; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+      transition: box-shadow 0.25s ease, transform 0.15s ease;
+    }
+
+    @media (min-width: 768px) {
+      .card { padding: 24px; }
+    }
+
+    .card:hover {
+      box-shadow: var(--shadow-lg);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 0;
+    }
+
+    @media (min-width: 768px) {
+      .card-title { font-size: 1.15rem; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 44px;
+      padding: 0 20px;
+      border-radius: 10px;
+      border: none;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, transform 0.1s, box-shadow 0.2s;
+      text-decoration: none;
+      line-height: 1;
+    }
+
+    .btn:active { transform: translateY(1px); }
+
+    .btn-primary {
+      background: var(--primary);
       color: #fff;
-      text-shadow: 2px 2px 0 #222;
+      box-shadow: 0 2px 8px rgba(34,197,94,0.25);
     }
-    .retro-border {
-      border: 4px solid #00ff99;
-      box-shadow: 0 0 0 4px #222, 0 0 16px 0 #00ff9988;
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      box-shadow: 0 6px 16px rgba(34,197,94,0.3);
+    }
+
+    .btn-secondary {
+      background: #ffffff;
+      color: var(--ink);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: #f9fafb;
+      border-color: #d1d5db;
+    }
+
+    .btn:disabled, .btn.disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .input {
+      width: 100%;
+      height: 44px;
+      padding: 0 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 0.95rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(34,197,94,0.15);
+    }
+
+    select.input {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-position: right 10px center;
+      background-repeat: no-repeat;
+      background-size: 18px;
+      padding-right: 32px;
+    }
+
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+
+    .logo-img {
+      width: 48px;
+      height: 48px;
       border-radius: 12px;
+      object-fit: cover;
+      border: 1px solid var(--border);
     }
-    .pixel-btn {
-      background: #222;
-      color: #00ff99;
-      border: 2px solid #00ff99;
-      font-family: 'Press Start 2P', monospace;
-      padding: 0.5rem 1.5rem;
-      margin: 0.5rem;
-      border-radius: 8px;
-      transition: background 0.2s, color 0.2s;
+
+    .offline-badge {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      background: #dc2626;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      box-shadow: var(--shadow-lg);
+      display: none;
     }
-    .pixel-btn:hover {
-      background: #00ff99;
-      color: #222;
+
+    .install-banner {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      right: 16px;
+      z-index: 50;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--shadow-lg);
+      display: none;
+    }
+
+    @media (min-width: 768px) {
+      .install-banner {
+        left: auto;
+        right: 24px;
+        width: 360px;
+        bottom: 24px;
+      }
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+
+    @media (min-width: 1024px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+    }
+
+    .left-col, .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    @media (min-width: 1024px) {
+      .left-col, .right-col { gap: 24px; }
+    }
+
+    .results-box {
+      background: #f8fafc;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 80px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--ink);
+    }
+
+    .chat-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    @media (min-width: 640px) {
+      .chat-controls { flex-direction: row; }
+      .chat-controls .input { flex: 1; }
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .header-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin: 0;
+      letter-spacing: -0.3px;
+    }
+
+    @media (min-width: 768px) {
+      .brand h1 { font-size: 2rem; }
+    }
+
+    .brand p {
+      margin: 2px 0 0;
+      color: var(--ink-muted);
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    @media (min-width: 768px) {
+      .brand p { font-size: 0.95rem; }
+    }
+
+    .lang-select {
+      height: 40px;
+      padding: 0 32px 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 0.9rem;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-position: right 8px center;
+      background-repeat: no-repeat;
+      background-size: 18px;
+      cursor: pointer;
+      min-width: 140px;
+    }
+
+    .footer-bar {
+      text-align: center;
+      padding: 24px 16px;
+      color: var(--ink-muted);
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    @media (min-width: 768px) {
+      .footer-bar { font-size: 0.85rem; }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.5s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
   </style>
 </head>
-<body class="flex flex-col items-center justify-center min-h-screen">
-  <div class="absolute top-4 right-8">
-    <select id="langSelect" class="p-1 rounded text-black">
-      <option value="en">English</option>
-      <option value="hi">हिन्दी</option>
-      <option value="bn">বাংলা</option>
-      <option value="ta">தமிழ்</option>
-      <option value="te">తెలుగు</option>
-      <option value="mr">मराठी</option>
-      <option value="gu">ગુજરાતી</option>
-      <option value="kn">ಕನ್ನಡ</option>
-      <option value="ml">മലയാളം</option>
-      <option value="pa">ਪੰਜਾਬੀ</option>
-      <option value="ur">اردو</option>
-      <option value="or">ଓଡ଼ିଆ</option>
-      <option value="as">অসমীয়া</option>
-    </select>
+<body>
+  <!-- Offline Indicator -->
+  <div id="offlineIndicator" class="offline-badge" aria-live="polite">
+    You are currently offline. Some features may be limited.
   </div>
-  <header class="mt-8 mb-6">
-    <h1 class="text-3xl md:text-5xl retro-border py-4 bg-black bg-opacity-60 text-center w-full">
-        KrishiVaani AI
-      </h1>
-          <p class="mt-4 text-lg md:text-xl text-center bg-black bg-opacity-50 px-4 py-2 rounded retro-border">Smart Farming Insights for Every Indian Farmer</p>
-  </header>
-  <main class="w-full max-w-2xl p-8 bg-black bg-opacity-70 retro-border">
-    <section class="mb-6">
-      <h2 class="text-xl mb-2" data-i18n="uploadLabel">Upload Crop Leaf Photo</h2>
-      <input type="file" id="imageInput" accept="image/*" class="block w-full mb-4" />
-      <button class="pixel-btn" id="analyzeBtn" data-i18n="analyzeBtn">Analyze</button>
-    </section>
-    <section class="mb-6">
-      <h2 class="text-xl mb-2" data-i18n="askSpeak">Ask or Speak Your Query</h2>
-      <div class="flex gap-2">
-        <input type="text" id="textQuery" placeholder="Type your question..." data-i18n-placeholder="queryPlaceholder" class="block w-full mb-2 p-2 rounded text-black" />
-        <button class="pixel-btn" id="sendBtn" aria-label="Send Query" data-i18n="sendBtn">Send</button>
-        <button class="pixel-btn" id="voiceBtn" aria-label="Speak Query" data-i18n="speakBtn">🎤 Speak</button>
-        <button class="pixel-btn" id="stopBtn" aria-label="Stop Voice / Speech" data-i18n="stopBtn">⏹ Stop</button>
-      </div>
-    </section>
-    <section class="mb-8">
-      <h2 class="text-2xl mb-4 font-bold">Results & Advice</h2>
-      <div class="flex items-center mb-2">
-        <img src="images/Screenshot 2025-06-24 004009.png" alt="KrishiVaani AI Avatar" class="w-10 h-10 rounded-full mr-3 border-2 border-green-400 bg-black bg-opacity-40" />
-        <span class="font-mono text-green-300 text-xs">KrishiVaani AI</span>
-      </div>
-      <div id="results" class="p-4 bg-gray-900 bg-opacity-80 rounded retro-border min-h-[80px]">Awaiting input...</div>
-      <button class="pixel-btn mt-4" id="speakAdviceBtn" data-i18n="listenBtn">🔊 Listen</button>
-    </section>
-    <section class="mt-8">
-      <div class="mb-6">
-        <h3 class="text-lg mb-2" data-i18n="weatherHeading">Weather</h3>
-        <button class="pixel-btn mb-2" id="fetchWeatherBtn" data-i18n="useLocationBtn">📍 Use My Location</button>
-        <div id="weather" class="p-2 bg-gray-800 rounded retro-border min-h-[40px]">Loading...</div>
-      </div>
-      <div>
-        <h3 class="text-lg mb-2" data-i18n="mandiHeading">Mandi Prices</h3>
-        <div class="flex flex-wrap gap-2 mb-2">
-          <select id="marketSelect" class="p-1 rounded text-black" title="Select Market (City)" aria-label="Select Market">
-            <optgroup label="North India">
-              <option value="DELHI">Delhi</option>
-              <option value="LUDHIANA">Ludhiana</option>
-              <option value="AMRITSAR">Amritsar</option>
-              <option value="CHANDIGARH">Chandigarh</option>
-              <option value="KANPUR">Kanpur</option>
-              <option value="LUCKNOW">Lucknow</option>
-              <option value="AGRA">Agra</option>
-              <option value="JAIPUR">Jaipur</option>
-              <option value="VARANASI">Varanasi</option>
-              <option value="ALLAHABAD">Allahabad</option>
-            </optgroup>
-            <optgroup label="West India">
-              <option value="MUMBAI">Mumbai</option>
-              <option value="NAGPUR">Nagpur</option>
-              <option value="PUNE">Pune</option>
-              <option value="AHMEDABAD">Ahmedabad</option>
-              <option value="SURAT">Surat</option>
-              <option value="VADODARA">Vadodara</option>
-              <option value="RAJKOT">Rajkot</option>
-              <option value="NASHIK">Nashik</option>
-              <option value="AURANGABAD">Aurangabad</option>
-            </optgroup>
-            <optgroup label="South India">
-              <option value="BENGALURU">Bengaluru</option>
-              <option value="CHENNAI">Chennai</option>
-              <option value="HYDERABAD">Hyderabad</option>
-              <option value="COIMBATORE">Coimbatore</option>
-              <option value="MADURAI">Madurai</option>
-              <option value="VIJAYAWADA">Vijayawada</option>
-              <option value="VISAKHAPATNAM">Visakhapatnam</option>
-              <option value="THIRUVANANTHAPURAM">Thiruvananthapuram</option>
-              <option value="MYSURU">Mysuru</option>
-              <option value="HUBBALLI">Hubballi</option>
-            </optgroup>
-            <optgroup label="East & North-East India">
-              <option value="KOLKATA">Kolkata</option>
-              <option value="PATNA">Patna</option>
-              <option value="GUWAHATI">Guwahati</option>
-              <option value="RANCHI">Ranchi</option>
-              <option value="BHUBANESWAR">Bhubaneswar</option>
-              <option value="SILIGURI">Siliguri</option>
-              <option value="DURGAPUR">Durgapur</option>
-              <option value="AGARTALA">Agartala</option>
-              <option value="SHILLONG">Shillong</option>
-              <option value="AIZAWL">Aizawl</option>
-            </optgroup>
-            <optgroup label="Central India">
-              <option value="BHOPAL">Bhopal</option>
-              <option value="INDORE">Indore</option>
-              <option value="JABALPUR">Jabalpur</option>
-              <option value="RAIPUR">Raipur</option>
-              <option value="BILASPUR">Bilaspur</option>
-              <option value="GWALIOR">Gwalior</option>
-              <option value="SATNA">Satna</option>
-              <option value="REWA">Rewa</option>
-              <option value="SAGAR">Sagar</option>
-              <option value="UJJAIN">Ujjain</option>
-            </optgroup>
-          </select>
-          <select id="commoditySelect" class="p-1 rounded text-black" title="Select Crop/Commodity" aria-label="Select Commodity">
-            <option value="Wheat">Wheat</option>
-            <option value="Rice">Rice</option>
-            <option value="Maize">Maize</option>
-            <option value="Cotton">Cotton</option>
-            <option value="Soyabean">Soyabean</option>
-            <option value="Potato">Potato</option>
-            <option value="Onion">Onion</option>
-            <option value="Tomato">Tomato</option>
-            <option value="Sugarcane">Sugarcane</option>
-            <option value="Groundnut">Groundnut</option>
-            <option value="Mustard">Mustard</option>
-            <option value="Paddy">Paddy</option>
-            <option value="Barley">Barley</option>
-            <option value="Bajra">Bajra</option>
-            <option value="Jowar">Jowar</option>
-            <option value="Chana">Chana</option>
-            <option value="Masur">Masur</option>
-            <option value="Moong">Moong</option>
-            <option value="Urad">Urad</option>
-            <option value="Peas">Peas</option>
-            <option value="Arhar">Arhar</option>
-            <option value="Green Gram">Green Gram</option>
-            <option value="Black Gram">Black Gram</option>
-            <option value="Red Gram">Red Gram</option>
-            <option value="Lentil">Lentil</option>
-            <option value="Gram">Gram</option>
-            <option value="Sesame">Sesame</option>
-            <option value="Sunflower">Sunflower</option>
-            <option value="Linseed">Linseed</option>
-            <option value="Castor">Castor</option>
-            <option value="Rapeseed">Rapeseed</option>
-            <option value="Safflower">Safflower</option>
-            <option value="Sorghum">Sorghum</option>
-            <option value="Millet">Millet</option>
-            <option value="Pearl Millet">Pearl Millet</option>
-            <option value="Finger Millet">Finger Millet</option>
-            <option value="Little Millet">Little Millet</option>
-            <option value="Foxtail Millet">Foxtail Millet</option>
-            <option value="Proso Millet">Proso Millet</option>
-            <option value="Kodo Millet">Kodo Millet</option>
-            <option value="Barnyard Millet">Barnyard Millet</option>
-            <option value="Horse Gram">Horse Gram</option>
-            <option value="Bengal Gram">Bengal Gram</option>
-            <option value="Kidney Beans">Kidney Beans</option>
-            <option value="French Beans">French Beans</option>
-            <option value="Cluster Beans">Cluster Beans</option>
-            <option value="Cowpea">Cowpea</option>
-            <option value="Pigeon Pea">Pigeon Pea</option>
-            <option value="Red Kidney Beans">Red Kidney Beans</option>
-            <option value="Green Peas">Green Peas</option>
-            <option value="Carrot">Carrot</option>
-            <option value="Cabbage">Cabbage</option>
-            <option value="Cauliflower">Cauliflower</option>
-            <option value="Spinach">Spinach</option>
-            <option value="Radish">Radish</option>
-            <option value="Brinjal">Brinjal</option>
-            <option value="Pumpkin">Pumpkin</option>
-            <option value="Bottle Gourd">Bottle Gourd</option>
-            <option value="Bitter Gourd">Bitter Gourd</option>
-            <option value="Cucumber">Cucumber</option>
-            <option value="Okra">Okra</option>
-            <option value="Apple">Apple</option>
-            <option value="Banana">Banana</option>
-            <option value="Mango">Mango</option>
-            <option value="Orange">Orange</option>
-            <option value="Grapes">Grapes</option>
-            <option value="Pomegranate">Pomegranate</option>
-            <option value="Guava">Guava</option>
-            <option value="Papaya">Papaya</option>
-            <option value="Lemon">Lemon</option>
-            <option value="Watermelon">Watermelon</option>
-            <option value="Muskmelon">Muskmelon</option>
-          </select>
-          <button class="pixel-btn" id="fetchMandiBtn">Fetch Prices</button>
+
+  <!-- Install PWA Banner -->
+  <div id="installBanner" class="install-banner" role="dialog" aria-label="Install app">
+    <p style="margin: 0 0 12px; color: var(--ink); font-weight: 500;">Install CH AI for offline access and faster performance</p>
+    <div style="display: flex; gap: 8px;">
+      <button id="installBtn" class="btn btn-primary" style="flex: 1;">Install App</button>
+      <button id="dismissInstallBtn" class="btn btn-secondary" style="flex: 1;">Not now</button>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <!-- Header -->
+    <header class="header-bar fade-in">
+      <div class="brand">
+        <img src="/static/images/Screenshot 2025-06-24 004009.png" alt="CH AI Avatar" class="logo-img">
+        <div>
+          <h1>CH AI</h1>
+          <p>Smart Farming Assistant</p>
         </div>
-        <div id="mandi" class="p-2 bg-gray-800 rounded retro-border min-h-[40px]">Loading...</div>
       </div>
-    </section>
-  </main>
-  <footer class="mt-8 mb-4 text-center text-xs bg-black bg-opacity-40 px-4 py-2 rounded retro-border">
-    &copy; 2025 KrishiVaani AI &mdash; Empowering Farmers in Every Language
-  </footer>
+      <select id="langSelect" class="lang-select" aria-label="Select Language">
+        <option value="en">English</option>
+        <option value="hi">हिन्दी</option>
+        <option value="bn">বাংলা</option>
+        <option value="ta">தமிழ்</option>
+        <option value="te">తెలుగు</option>
+        <option value="mr">मराठी</option>
+        <option value="gu">ગુજરાતી</option>
+        <option value="kn">ಕನ್ನಡ</option>
+        <option value="ml">മലയാളം</option>
+        <option value="pa">ਪੰਜਾਬੀ</option>
+        <option value="ur">اردو</option>
+        <option value="or">ଓଡ଼ିଆ</option>
+        <option value="as">অসমীয়া</option>
+      </select>
+    </header>
+
+    <!-- Dashboard -->
+    <main class="dashboard-grid fade-in">
+      <!-- Left Column -->
+      <div class="left-col">
+        <!-- Upload Card -->
+        <section class="card">
+          <div class="card-header">
+            <div style="width:36px;height:36px;border-radius:10px;background:#dcfce7;color:#16a34a;display:flex;align-items:center;justify-content:center;font-weight:700;">📷</div>
+            <h2 class="card-title" data-i18n="uploadLabel">Upload Crop Leaf Photo</h2>
+          </div>
+          <input type="file" id="imageInput" accept="image/*" class="input" style="height:auto;padding:10px 12px;" />
+          <div class="btn-row">
+            <button class="btn btn-primary" id="analyzeBtn" data-i18n="analyzeBtn">Analyze</button>
+          </div>
+        </section>
+
+        <!-- Weather Card -->
+        <section class="card">
+          <div class="card-header">
+            <div style="width:36px;height:36px;border-radius:10px;background:#dbeafe;color:#2563eb;display:flex;align-items:center;justify-content:center;font-weight:700;">🌤</div>
+            <h3 class="card-title" data-i18n="weatherHeading">Weather</h3>
+          </div>
+          <button class="btn btn-primary" id="fetchWeatherBtn" data-i18n="useLocationBtn" style="width:100%;">📍 Use My Location</button>
+          <div id="weather" style="margin-top:12px;">Loading...</div>
+        </section>
+
+        <!-- Right Column -->
+      <div class="right-col">
+        <!-- Chat Card -->
+        <section class="card">
+          <div class="card-header">
+            <div style="width:36px;height:36px;border-radius:10px;background:#fce7f3;color:#db2777;display:flex;align-items:center;justify-content:center;font-weight:700;">💬</div>
+            <h2 class="card-title" data-i18n="askSpeak">Ask or Speak Your Query</h2>
+          </div>
+          <div class="chat-controls">
+            <input type="text" id="textQuery" placeholder="Type your question..." data-i18n-placeholder="queryPlaceholder" class="input" />
+            <div class="btn-row" style="margin-top:0;">
+              <button class="btn btn-primary" id="sendBtn" aria-label="Send Query" data-i18n="sendBtn">Send</button>
+              <button class="btn btn-secondary" id="voiceBtn" aria-label="Speak Query" data-i18n="speakBtn">🎤 Speak</button>
+            </div>
+            <div class="btn-row" style="margin-top:0;">
+              <button class="btn btn-secondary" id="stopBtn" aria-label="Stop Voice / Speech" data-i18n="stopBtn" style="flex:1;">⏹ Stop</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Results Card -->
+        <section class="card">
+          <div class="card-header">
+            <img src="/static/images/Screenshot 2025-06-24 004009.png" alt="CH AI Avatar" class="avatar" style="max-width:180px;width:100%;height:auto;border-radius:12px;">
+            <div>
+              <h2 class="card-title" style="margin-bottom:2px;">Results & Advice</h2>
+              <span style="font-size:0.8rem;color:var(--ink-muted);font-weight:500;">CH AI Assistant</span>
+            </div>
+          </div>
+          <div id="results" class="results-box">Awaiting input...</div>
+          <div id="resultImages" style="display:none; margin-top:12px;">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Original Leaf</p>
+                <img id="originalImage" src="" alt="Original leaf" style="width:100%; border-radius:10px; border:1px solid var(--border);" />
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Affected Region Visualization</p>
+                <img id="gradcamImage" src="" alt="AI attention heatmap" style="width:100%; border-radius:10px; border:1px solid var(--border);" />
+              </div>
+            </div>
+            <p style="font-size:0.75rem;color:var(--ink-muted);margin-top:6px;">The highlighted area shows where the AI model focused during prediction.</p>
+          </div>
+           <div id="confidenceBar" style="display:none; margin-top:12px;">
+             <p class="text-xs text-gray-500 mb-1">Confidence</p>
+             <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+               <div id="confidenceFill" class="bg-green-500 h-3 rounded-full transition-all duration-500" style="width:0%"></div>
+             </div>
+             <p id="confidenceText" class="text-sm text-gray-700 mt-1"></p>
+           </div>
+           <div id="uncertaintyWarning" style="display:none; margin-top:8px;">
+             <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+               <strong>Low confidence:</strong> The AI model is not confident in this prediction. Consider consulting a local agricultural expert.
+             </div>
+           </div>
+           <div id="topPredictions" style="display:none; margin-top:12px;">
+            <p class="text-xs text-gray-500 mb-1">Top Predictions</p>
+            <div id="topPredictionsList" class="space-y-1"></div>
+          </div>
+          <div class="btn-row" style="margin-top:12px;">
+            <button class="btn btn-primary" id="speakAdviceBtn" data-i18n="listenBtn" style="width:100%;">🔊 Listen</button>
+          </div>
+        </section>
+
+        <!-- Training Card -->
+        <section class="card" id="trainingCard" style="display:none;">
+          <div class="card-header">
+            <div style="width:36px;height:36px;border-radius:10px;background:#fef3c7;color:#d97706;display:flex;align-items:center;justify-content:center;font-weight:700;">🧪</div>
+            <div>
+              <h2 class="card-title" style="margin-bottom:2px;">Model Training</h2>
+              <span style="font-size:0.8rem;color:var(--ink-muted);font-weight:500;">MobileNetV2 on PlantVillage</span>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-bottom:12px;">
+            <button class="btn btn-primary" id="showTrainingBtn" style="flex:1;">Open Training Monitor</button>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Training Modal -->
+    <div id="trainingModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:60; align-items:center; justify-content:center; padding:16px;">
+      <div class="card" style="max-width:720px; width:100%; max-height:90vh; overflow-y:auto; margin:auto;">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Training Progress</h2>
+            <span style="font-size:0.8rem;color:var(--ink-muted);font-weight:500;" id="trainingStatusLabel">Not Started</span>
+          </div>
+          <button id="closeTrainingBtn" class="btn btn-secondary" style="height:36px;padding:0 12px;font-size:0.85rem;">Close</button>
+        </div>
+        <div style="margin-bottom:12px;">
+          <div class="flex items-center justify-between text-sm text-gray-600 mb-1">
+            <span>Epoch <span id="trainingEpoch">0</span> / <span id="trainingTotalEpochs">15</span></span>
+            <span id="trainingProgressPct">0%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+            <div id="trainingProgressBar" class="bg-green-500 h-3 rounded-full transition-all duration-500" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3" style="margin-bottom:12px;">
+          <div class="p-3 bg-gray-50 rounded-lg border">
+            <p class="text-xs text-gray-500 uppercase tracking-wide">Training Accuracy</p>
+            <p class="mt-1 text-lg font-semibold text-gray-900" id="trainingTrainAcc">--</p>
+          </div>
+          <div class="p-3 bg-gray-50 rounded-lg border">
+            <p class="text-xs text-gray-500 uppercase tracking-wide">Validation Accuracy</p>
+            <p class="mt-1 text-lg font-semibold text-gray-900" id="trainingValAcc">--</p>
+          </div>
+          <div class="p-3 bg-gray-50 rounded-lg border">
+            <p class="text-xs text-gray-500 uppercase tracking-wide">Training Loss</p>
+            <p class="mt-1 text-lg font-semibold text-gray-900" id="trainingTrainLoss">--</p>
+          </div>
+          <div class="p-3 bg-gray-50 rounded-lg border">
+            <p class="text-xs text-gray-500 uppercase tracking-wide">Validation Loss</p>
+            <p class="mt-1 text-lg font-semibold text-gray-900" id="trainingValLoss">--</p>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="startTrainingBtn" style="flex:1;">Start Training</button>
+        </div>
+        <p id="trainingError" class="mt-2 text-sm text-red-600" style="display:none;"></p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer-bar">
+      &copy; 2026 CH AI — Empowering Farmers in Every Language
+    </footer>
+  </div>
+
   <script src="/main.js"></script>
 </body>
 </html>

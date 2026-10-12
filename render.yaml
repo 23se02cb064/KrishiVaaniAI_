@@ -6,22 +6,17 @@ services:
     buildCommand: |
       pip install --upgrade pip
       pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
-      pip install -r requirements.txt
+      pip install -r requirements-deploy.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     envVars:
-      - key: GEMINI_API_KEY
+      - key: OPENROUTER_API_KEY
         from:
           type: secret
-          name: gemini_api_key
+          name: openrouter_api_key
       - key: OPENWEATHER_API_KEY
         from:
           type: secret
           name: openweather_api_key
-      - key: MANDI_API_KEY
-        from:
-          type: secret
-          name: mandi_api_key
-          property: mandi_api_key
     plan: free
     numInstances: 1
-    healthCheckPath: /
+    healthCheckPath: /health

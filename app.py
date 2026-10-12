@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models, transforms
-from PIL import Image
+from PIL import Image, ImageOps
 import numpy as np
 from flask import Flask, request, jsonify, send_file, send_from_directory, url_for, redirect
 from flask_cors import CORS
@@ -24,7 +24,9 @@ from gtts import gTTS
 import base64
 from dotenv import load_dotenv
 from openai import OpenAI
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+import httpx
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 import jwt
@@ -32,6 +34,140 @@ from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from gradcam import generate_gradcam_overlay, find_target_layer
+
+# Select CUDA when available; otherwise use CPU.
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+# ---------------------------------------------------------------------------
+# Image Preprocessing Utilities
+# ---------------------------------------------------------------------------
+MAX_IMAGE_DIMENSION = 4096
+MAX_IMAGE_DIMENSION_FOR_PROCESSING = 2048  # Resize larger images to this
+SUPPORTED_FORMATS = {'JPEG', 'PNG', 'WEBP'}
+ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+
+def preprocess_uploaded_image(image_bytes: bytes) -> Image.Image:
+    """
+    Preprocess an uploaded image for model inference.
+
+    Handles:
+    - EXIF orientation correction
+    - RGBA/P/RGB mode conversion
+    - Format validation (JPEG, PNG, WebP)
+    - Dimension limits (resizes if too large)
+    - Safe RGB conversion
+
+    Returns:
+        PIL Image in RGB mode, ready for model preprocessing
+
+    Raises:
+        ValueError: If image is invalid or unsupported format
+    """
+    try:
+        # Open image without loading full data first
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Validate format
+        if image.format not in SUPPORTED_FORMATS:
+            raise ValueError(f'Unsupported image format: {image.format}. Supported: JPEG, PNG, WebP')
+
+        # Load the image data
+        image.load()
+
+        # Check dimensions after loading - resize if too large
+        width, height = image.size
+        if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
+            # Resize to max dimension while maintaining aspect ratio
+            image.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.LANCZOS)
+
+        # Apply EXIF orientation correction
+        image = ImageOps.exif_transpose(image)
+
+        # Resize if too large for processing (maintain aspect ratio)
+        width, height = image.size
+        if width > MAX_IMAGE_DIMENSION_FOR_PROCESSING or height > MAX_IMAGE_DIMENSION_FOR_PROCESSING:
+            image.thumbnail((MAX_IMAGE_DIMENSION_FOR_PROCESSING, MAX_IMAGE_DIMENSION_FOR_PROCESSING), Image.LANCZOS)
+
+        # Convert to RGB (handles RGBA, P, L, etc.)
+        if image.mode != 'RGB':
+            # For RGBA, composite on white background
+            if image.mode == 'RGBA':
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[-1])
+                image = background
+            elif image.mode == 'P':
+                # Palette mode - convert via RGBA to handle transparency
+                image = image.convert('RGBA')
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[-1])
+                image = background
+            else:
+                # Other modes (L, CMYK, etc.)
+                image = image.convert('RGB')
+
+        return image
+
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f'Failed to process image: {str(e)}')
+
+
+def validate_image_file(file_storage) -> tuple[bool, str | None]:
+    """
+    Validate uploaded file before processing.
+
+    Returns:
+        (is_valid, error_message)
+    """
+    if not file_storage or not file_storage.filename:
+        return False, 'No file provided'
+
+    filename = file_storage.filename.lower()
+    if not ('.' in filename and filename.rsplit('.', 1)[1] in ALLOWED_IMAGE_EXTENSIONS):
+        return False, 'Invalid file type. Allowed: PNG, JPG, JPEG, WebP'
+
+    # Check MIME type
+    if file_storage.mimetype not in ALLOWED_MIME_TYPES:
+        return False, f'Invalid MIME type: {file_storage.mimetype}. Allowed: image/jpeg, image/png, image/webp'
+
+    # Check file size (Flask's MAX_CONTENT_LENGTH handles this but we check early)
+    file_storage.seek(0, io.SEEK_END)
+    size = file_storage.tell()
+    file_storage.seek(0)
+    if size > MAX_IMAGE_SIZE:
+        return False, f'File too large: {size / (1024*1024):.1f}MB. Maximum: {MAX_IMAGE_SIZE / (1024*1024)}MB'
+    if size == 0:
+        return False, 'Empty file'
+
+    return True, None
+
+
+def validate_image_content(file_stream) -> tuple[bool, str | None]:
+    """Verify file is actually an image by checking magic bytes."""
+    file_stream.seek(0)
+    header = file_stream.read(12)
+    file_stream.seek(0)
+
+    image_signatures = {
+        b'\x89PNG\r\n\x1a\n': 'png',
+        b'\xff\xd8\xff': 'jpg',
+        b'RIFF': 'webp',  # WebP starts with RIFF
+    }
+
+    for sig, fmt in image_signatures.items():
+        if header.startswith(sig):
+            # Additional check for WebP - needs 'WEBP' at offset 8
+            if fmt == 'webp':
+                file_stream.seek(8)
+                webp_header = file_stream.read(4)
+                file_stream.seek(0)
+                if webp_header != b'WEBP':
+                    continue
+            return True, fmt
+
+    return False, None
 
 
 class RetryableHTTPError(Exception):
@@ -149,8 +285,10 @@ class AIService:
 
         if GEMINI_API_KEY:
             try:
-                genai.configure(api_key=GEMINI_API_KEY)
-                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+                self.gemini_model = genai.Client(
+                    api_key=GEMINI_API_KEY,
+                    http_options=types.HttpOptions(timeout=10000, retry_options=types.HttpRetryOptions(attempts=1)),
+                )
                 logger.info('Gemini client initialized')
             except Exception as e:
                 logger.error('Failed to initialize Gemini client: %s', e, exc_info=True)
@@ -187,6 +325,7 @@ class AIService:
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                extra_body={'reasoning_effort': 'low'},
                 **extra,
             )
             duration = int((time.time() - start) * 1000)
@@ -257,13 +396,22 @@ class AIService:
     @retry(
         stop=stop_after_attempt(2),
         wait=wait_exponential(multiplier=1, min=1, max=3),
-        retry=retry_if_exception_type((requests.exceptions.Timeout, requests.exceptions.ConnectionError, RetryableHTTPError)),
+        retry=retry_if_exception_type((
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+            RetryableHTTPError,
+            httpx.TimeoutException,
+            httpx.ConnectError,
+        )),
         reraise=True
     )
     def _call_gemini(self, messages, max_tokens, temperature, timeout=None):
         if self.gemini_model is None:
             raise ValueError('Gemini client not configured')
+
         start = time.time()
+        model_name = 'gemini-3.8-flash'
+
         try:
             prompt_parts = []
             for msg in messages:
@@ -273,30 +421,60 @@ class AIService:
                     prompt_parts.append(f"[System instruction: {content}]")
                 else:
                     prompt_parts.append(content)
+
             full_prompt = '\n\n'.join(prompt_parts)
-            response = self.gemini_model.generate_content(
-                full_prompt,
+            timeout_seconds = (
+                min(10.0, max(0.1, float(timeout)))
+                if timeout is not None else 10.0
+            )
+
+            interaction = self.gemini_model.interactions.create(
+                model=model_name,
+                input=full_prompt,
                 generation_config={
                     'max_output_tokens': max_tokens,
                     'temperature': temperature,
+                    'thinking_level': 'low',
                 },
-                request_options={'timeout': min(10, timeout) if timeout else 10}
+                timeout=int(timeout_seconds * 1000),
             )
+
             duration = int((time.time() - start) * 1000)
-            text = getattr(response, 'text', None)
-            if not text:
-                block_reason = getattr(getattr(response, 'prompt_feedback', None), 'block_reason', None)
-                raise ValueError(f'Gemini returned empty content. Block reason: {block_reason}')
-            self._log_provider_attempt('Gemini', 'gemini-2.0-flash', status=200, duration=duration)
-            return text, None
+            response_text = getattr(interaction, 'output_text', None)
+            if not response_text or not response_text.strip():
+                status_value = getattr(interaction, 'status', 'unknown')
+                raise ValueError(
+                    f'Gemini returned no final text (status={status_value})'
+                )
+
+            self._log_provider_attempt(
+                'Gemini', model_name, status=200, duration=duration
+            )
+            return response_text.strip(), None
+
         except Exception as e:
             duration = int((time.time() - start) * 1000)
-            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            status = getattr(e, 'code', None)
+            if status is None:
+                status = getattr(e, 'status_code', None)
+            if status is None:
+                response = getattr(e, 'response', None)
+                status = getattr(response, 'status_code', None)
+
             error_msg = f'Gemini failed (status={status}): {e}'
-            self._log_provider_attempt('Gemini', 'gemini-2.0-flash', status=status, duration=duration, error=error_msg)
+            self._log_provider_attempt(
+                'Gemini', model_name, status=status,
+                duration=duration, error=error_msg
+            )
+
             if status and status not in RETRYABLE_STATUS_CODES and status not in FATAL_STATUS_CODES:
                 raise
+
+            if isinstance(e, (httpx.TimeoutException, httpx.ConnectError)):
+                raise RetryableHTTPError(status or 500, str(e)) from e
+
             _classify_http_error(status or 500, str(e))
+
 
     def _local_fallback(self, query):
         query_lower = query.lower()
@@ -383,7 +561,7 @@ class PredictionRecord(Base):
 
 Base.metadata.create_all(bind=engine)
 
-JWT_SECRET = os.getenv('JWT_SECRET', 'change-me')
+JWT_SECRET = os.getenv('JWT_SECRET', 'krishivaani-local-test-secret-change-before-production-2026')
 JWT_ALGO = 'HS256'
 
 
@@ -455,19 +633,36 @@ def _sha256(path):
 
 
 MODEL_SHA256 = _sha256(MODEL_PATH)
-if MODEL_SHA256 == AUDITED_MODEL_SHA256:
-    logger.info('Model checkpoint matches the audited production SHA256')
-else:
-    logger.error(
-        'Model checkpoint SHA256 %s does not match the audited production '
-        'checkpoint %s (loaded from %s). This is a different model: verify the '
-        'deployment is shipping the intended weights.',
-        MODEL_SHA256, AUDITED_MODEL_SHA256, MODEL_PATH)
 
+EXPECTED_PRODUCTION_MODEL_SHA256 = (
+    '9A6B3EB1F3D48FB34831E13C840A6D09E481A6D7588807390661DF74BC5FB850'
+)
+
+# Ensure the configured hash cannot override the approved production hash.
+if AUDITED_MODEL_SHA256 != EXPECTED_PRODUCTION_MODEL_SHA256:
+    raise RuntimeError(
+        'AUDITED_MODEL_SHA256 does not match the approved production hash. '
+        'Refusing to start.'
+    )
+
+# Refuse to start if the wrong model checkpoint is selected.
+if MODEL_SHA256 != EXPECTED_PRODUCTION_MODEL_SHA256:
+    raise RuntimeError(
+        f'Model checkpoint SHA256 mismatch. '
+        f'Expected: {EXPECTED_PRODUCTION_MODEL_SHA256}; '
+        f'Actual: {MODEL_SHA256}; '
+        f'Loaded from: {MODEL_PATH}. '
+        f'Refusing to start.'
+    )
+
+logger.info(
+    'Model checkpoint matches the audited production SHA256'
+)
+
+# Load the class index mapping exactly once.
 with open(INDEX_TO_NAME_PATH, 'r') as f:
     class_to_name = json.load(f)
     idx_to_class = {int(k): v for k, v in class_to_name.items()}
-
 # ---------------------------------------------------------------------------
 # Training Status and Background Training
 # ---------------------------------------------------------------------------
@@ -555,8 +750,9 @@ def load_model(model_path):
     if missing:
         logger.warning('Some layers were randomly initialized: %s', missing[:10])
 
+    model = model.to(DEVICE)
     model.eval()
-    logger.info('Model loaded successfully')
+    logger.info('Model loaded successfully on device: %s', DEVICE)
     return model
 
 
@@ -727,10 +923,16 @@ REMEDY_MAP = {
     'Tomato___healthy': 'Your tomato plant looks healthy! Continue good cultural practices and regular monitoring.',
 }
 
+import concurrent.futures
+
 # Valid image extensions
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 MAX_IMAGE_SIZE = 16 * 1024 * 1024  # 16MB
 CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', 0.5))
+
+# Request timeouts
+ANALYZE_TIMEOUT_SECONDS = float(os.getenv('ANALYZE_TIMEOUT_SECONDS', '30'))
+GRADCAM_TIMEOUT_SECONDS = float(os.getenv('GRADCAM_TIMEOUT_SECONDS', '10'))
 
 # ---------------------------------------------------------------------------
 # Optional confidence calibration (temperature scaling)
@@ -792,22 +994,6 @@ def allowed_image_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
-def validate_image_content(file_stream):
-    """Verify file is actually an image by checking magic bytes."""
-    file_stream.seek(0)
-    header = file_stream.read(12)
-    file_stream.seek(0)
-    image_signatures = {
-        b'\x89PNG\r\n\x1a\n': 'png',
-        b'\xff\xd8\xff': 'jpg',
-        b'RIFF': 'webp',
-    }
-    for sig, fmt in image_signatures.items():
-        if header.startswith(sig):
-            return True, fmt
-    return False, None
-
-
 def predict_image(image_bytes):
     """Classify one image. Grad-CAM is not produced here.
 
@@ -818,9 +1004,9 @@ def predict_image(image_bytes):
 
     # Preprocessing
     start = time.perf_counter()
-    image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    image = preprocess_uploaded_image(image_bytes)
     input_tensor = preprocess(image)
-    input_batch = input_tensor.unsqueeze(0)
+    input_batch = input_tensor.unsqueeze(0).to(DEVICE)
     timings['preprocessing_ms'] = round((time.perf_counter() - start) * 1000, 2)
 
     # Inference. The backbone and the classifier are called separately so that the
@@ -859,8 +1045,8 @@ def predict_image(image_bytes):
         'top_k_classes': top_k_classes,
         'timings': timings,
         # Consumed by the leaf gate; stripped before the response leaves the server.
-        '_embedding': pooled[0].numpy().tolist(),
-        '_probabilities': probabilities[0].tolist(),
+        '_embedding': pooled[0].detach().cpu().numpy().tolist(),
+        '_probabilities': probabilities[0].detach().cpu().tolist(),
     }
 
     if CALIBRATION_TEMPERATURE:
@@ -884,12 +1070,16 @@ def attach_gradcam(result, image_bytes):
     """
     start = time.perf_counter()
     try:
-        overlay_b64, heatmap_b64, _, gradcam_error = generate_gradcam_overlay(
-            model, image_bytes)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(generate_gradcam_overlay, model, image_bytes)
+            overlay_b64, heatmap_b64, _, gradcam_error = future.result(timeout=GRADCAM_TIMEOUT_SECONDS)
         result['gradcam_overlay'] = overlay_b64
         result['gradcam_heatmap'] = heatmap_b64
         if gradcam_error:
             result['gradcam_error'] = gradcam_error
+    except concurrent.futures.TimeoutError:
+        logger.error(f'Grad-CAM generation timed out after {GRADCAM_TIMEOUT_SECONDS}s')
+        result['gradcam_error'] = 'Attention visualization timed out'
     except Exception as e:
         logger.error(f'Grad-CAM generation failed: {e}')
         result['gradcam_error'] = 'Failed to generate attention visualization'
@@ -1230,28 +1420,32 @@ def _gate_rejection_response(decision, lang, source):
 
 
 def _analyze_single_image(image_file, lang='en', include_gradcam=False, source='upload'):
-    if image_file.filename == '':
-        raise ValueError('No image selected')
+    # Validate file before reading
+    is_valid, error_msg = validate_image_file(image_file)
+    if not is_valid:
+        raise ValueError(error_msg)
 
-    if not allowed_image_file(image_file.filename):
-        raise ValueError('Invalid file type. Allowed: png, jpg, jpeg, webp')
-
+    # Check magic bytes
     is_valid, fmt = validate_image_content(image_file)
     if not is_valid:
         raise ValueError('File does not appear to be a valid image')
 
     image_bytes = image_file.read()
 
-    # Decode once, up front. Both the quality rules and the leaf classifier need a PIL
-    # image, and decoding here rather than inside each stage keeps the failure mode in
-    # one place.
+    # Decode once with improved preprocessing (EXIF, RGBA, etc.)
     try:
-        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        image = preprocess_uploaded_image(image_bytes)
+    except ValueError as e:
+        unreadable = {'state': 'REJECTED', 'is_leaf': False, 'leaf_confidence': 0.0,
+                      'quality_ok': False,
+                      'error_type': leaf_gate_module.ERROR_UNREADABLE,
+                      'reason': str(e), 'score_basis': 'quality', 'signals': None}
+        return _gate_rejection_response(unreadable, lang, source)
     except Exception:
         unreadable = {'state': 'REJECTED', 'is_leaf': False, 'leaf_confidence': 0.0,
                       'quality_ok': False,
                       'error_type': leaf_gate_module.ERROR_UNREADABLE,
-                      'reason': None, 'score_basis': 'quality', 'signals': None}
+                      'reason': 'Failed to process image', 'score_basis': 'quality', 'signals': None}
         return _gate_rejection_response(unreadable, lang, source)
 
     prediction = None
@@ -1458,9 +1652,15 @@ def analyze():
     image_file = request.files['image']
     source = request.form.get('source', 'upload')
 
+    # Run analysis with timeout to prevent hanging requests
+    def run_analysis():
+        return _analyze_single_image(image_file, lang, include_gradcam=include_gradcam, source=source)
+
     try:
-        result = _analyze_single_image(image_file, lang, include_gradcam=include_gradcam,
-                                       source=source)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_analysis)
+            result = future.result(timeout=ANALYZE_TIMEOUT_SECONDS)
+
         # A refusal carries no diagnosis, so it must not be recorded as a prediction.
         # Every gate refusal uses 422 Unprocessable Entity: the upload was a valid
         # image, it just cannot be diagnosed. A single terminal code keeps the client
@@ -1470,6 +1670,9 @@ def analyze():
             return jsonify(result), 422
         save_prediction_result(result)
         return jsonify(result), 200
+    except concurrent.futures.TimeoutError:
+        logger.error(f'Analysis timed out after {ANALYZE_TIMEOUT_SECONDS}s')
+        return jsonify({'error': 'Analysis timed out. Please try with a smaller image.'}), 504
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
