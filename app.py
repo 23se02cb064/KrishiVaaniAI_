@@ -1156,7 +1156,18 @@ Disease: {disease_name}
 @app.route('/')
 @app.route('/index.html')
 def serve_index():
-    return send_file('index.html')
+    react_index = os.path.join(app.root_path, 'frontend', 'dist', 'index.html')
+    if os.path.isfile(react_index):
+        return send_file(react_index)
+    return jsonify({'error': 'React frontend build not found'}), 503
+
+
+@app.route('/assets/<path:filename>')
+def serve_react_assets(filename):
+    assets_dir = os.path.join(app.root_path, 'frontend', 'dist', 'assets')
+    if not os.path.isdir(assets_dir):
+        return jsonify({'error': 'React assets not found'}), 404
+    return send_from_directory(assets_dir, filename)
 
 
 @app.route('/static/<path:filename>')

@@ -4,6 +4,13 @@ services:
     env: python@3.11
     region: ap-south-1
     buildCommand: |
+      curl -fsSLO https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz
+      tar -xJf node-v22.16.0-linux-x64.tar.xz
+      export PATH="$PWD/node-v22.16.0-linux-x64/bin:$PATH"
+      node --version
+      npm --version
+      npm ci --prefix frontend
+      npm run build --prefix frontend
       pip install --upgrade pip
       pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
       pip install -r requirements-deploy.txt
