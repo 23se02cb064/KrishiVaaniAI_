@@ -1,0 +1,8 @@
+{
+  "name": "ch-ai-api-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "http-proxy-middleware": "^2.0.6"
+  }
+}

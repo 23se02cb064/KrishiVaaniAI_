@@ -1,18 +1,22 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "builds": [
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "npm install --prefix api",
+  "functions": {
+    "api/proxy.js": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
     {
-      "src": "index.html",
-      "use": "@vercel/static"
+      "source": "/api/:path*",
+      "destination": "/api/proxy?path=:path*"
     },
     {
-      "src": "api/proxy.js",
-      "use": "@vercel/node"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
-  ],
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/api/(.*)", "dest": "/api/proxy.js" },
-    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

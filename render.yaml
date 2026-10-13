@@ -1,29 +1,25 @@
 services:
   - type: web
     name: krishivaani
-    env: python@3.11
-    region: ap-south-1
+    runtime: python
+    region: singapore
+    plan: free
+
     buildCommand: |
-      curl -fsSLO https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-x64.tar.xz
-      tar -xJf node-v22.16.0-linux-x64.tar.xz
-      export PATH="$PWD/node-v22.16.0-linux-x64/bin:$PATH"
-      node --version
-      npm --version
-      npm ci --prefix frontend
-      npm run build --prefix frontend
       pip install --upgrade pip
       pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
       pip install -r requirements-deploy.txt
+
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
-    envVars:
-      - key: OPENROUTER_API_KEY
-        from:
-          type: secret
-          name: openrouter_api_key
-      - key: OPENWEATHER_API_KEY
-        from:
-          type: secret
-          name: openweather_api_key
-    plan: free
-    numInstances: 1
+
     healthCheckPath: /health
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+      - key: OPENROUTER_API_KEY
+        sync: false
+
+      - key: OPENWEATHER_API_KEY
+        sync: false
