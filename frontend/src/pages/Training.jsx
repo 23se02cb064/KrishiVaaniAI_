@@ -120,7 +120,7 @@ export default function Training() {
 
   const loadStatus = async () => {
     try {
-      const res = await fetch('/api/training/status');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/training/status`);
       const data = await res.json();
       setStatus(data.status || 'not_started');
       setEpoch(data.epoch || 0);
@@ -157,7 +157,7 @@ export default function Training() {
   const startTraining = async () => {
     setError('');
     try {
-      const res = await fetch('/api/training/start', { method: 'POST' });
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/training/start`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Failed to start training');

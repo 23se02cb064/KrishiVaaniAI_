@@ -9,8 +9,8 @@ export default function Home() {
     const load = async () => {
       try {
         const [historyRes, analyticsRes] = await Promise.all([
-          fetch('/api/predictions?limit=6'),
-          fetch('/api/predictions/analytics'),
+          fetch(`${import.meta.env.VITE_API_URL || ''}/api/predictions?limit=6`),
+	    fetch(`${import.meta.env.VITE_API_URL || ''}/api/predictions/analytics`),
         ]);
         const historyData = await historyRes.json();
         const analyticsData = await analyticsRes.json();

@@ -63,7 +63,7 @@ export default function Disease() {
       formData.append('include_gradcam', 'true');
       formData.append('source', source);
 
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/analyze`, { method: 'POST', body: formData });
       const data = await res.json();
 
       // The leaf gate refuses the image before classification with HTTP 422. That is a

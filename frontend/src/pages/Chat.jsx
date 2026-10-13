@@ -10,7 +10,7 @@ export default function Chat() {
     setLoading(true);
     setReply('');
     try {
-      const data = await fetch('/api/chat', {
+      const data = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: query.trim(), lang: 'en' }),
