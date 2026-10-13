@@ -3,7 +3,7 @@
   "version": 2,
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "npm install --prefix api",
+  "installCommand": "npm install",
   "functions": {
     "api/proxy.js": {
       "maxDuration": 30
