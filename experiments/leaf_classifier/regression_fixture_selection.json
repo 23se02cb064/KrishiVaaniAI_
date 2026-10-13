@@ -1,0 +1,130 @@
+{
+  "healthy": [
+    {
+      "class_dir": "Apple___healthy",
+      "path": "data/PlantVillage/val/Apple___healthy/f3113ef9-20d8-4c82-9bff-66fe60e41065___RS_HL 7790.JPG",
+      "leaf_probability": 0.999961,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Tomato___healthy",
+      "path": "data/PlantVillage/val/Tomato___healthy/768d54a3-cb87-4633-9529-ad39b6f6078e___RS_HL 9864.JPG",
+      "leaf_probability": 0.999959,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Corn_(maize)___healthy",
+      "path": "data/PlantVillage/val/Corn_(maize)___healthy/4d603dbb-3e1e-4acd-ab00-8bdf858191a1___R.S_HL 5535 copy 3.jpg",
+      "leaf_probability": 0.999966,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Potato___healthy",
+      "path": "data/PlantVillage/val/Potato___healthy/111cd9d8-4d27-4225-be9e-d29b21cf56b9___RS_HL 5419.JPG",
+      "leaf_probability": 0.999649,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Grape___healthy",
+      "path": "data/PlantVillage/val/Grape___healthy/e554b5e2-8856-4e0e-be67-102f6845b1c9___Mt.N.V_HL 6089.JPG",
+      "leaf_probability": 0.999757,
+      "state": "LEAF"
+    }
+  ],
+  "diseased": [
+    {
+      "class_dir": "Tomato___Early_blight",
+      "path": "data/PlantVillage/val/Tomato___Early_blight/347120f8-e92d-43f7-9ace-196890cec04d___RS_Erly.B 9421.JPG",
+      "leaf_probability": 0.999991,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Tomato___Septoria_leaf_spot",
+      "path": "data/PlantVillage/val/Tomato___Septoria_leaf_spot/2423106f-b2fd-45ed-ac52-69c093b39826___Matt.S_CG 2737.JPG",
+      "leaf_probability": 0.999986,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Tomato___Leaf_Mold",
+      "path": "data/PlantVillage/val/Tomato___Leaf_Mold/f20ed4bc-ca80-440c-b254-95d0a1953da8___Crnl_L.Mold 8792.JPG",
+      "leaf_probability": 0.999995,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Corn_(maize)___Common_rust_",
+      "path": "data/PlantVillage/val/Corn_(maize)___Common_rust_/RS_Rust 2755.JPG",
+      "leaf_probability": 0.999763,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Potato___Early_blight",
+      "path": "data/PlantVillage/val/Potato___Early_blight/c5dc57d8-9a0d-4046-9eb4-b9db2f720a47___RS_Early.B 7047.JPG",
+      "leaf_probability": 0.999978,
+      "state": "LEAF"
+    },
+    {
+      "class_dir": "Potato___Late_blight",
+      "path": "data/PlantVillage/val/Potato___Late_blight/939a9a98-cbc9-4b83-bb47-395f26d7fddd___RS_LB 4293.JPG",
+      "leaf_probability": 0.999978,
+      "state": "LEAF"
+    }
+  ],
+  "ambiguous": [
+    {
+      "class_dir": "Tomato___Septoria_leaf_spot",
+      "path": "validation/external_large/Tomato___Septoria_leaf_spot/7-17-Photo3_Septoria-MARY.jpg",
+      "leaf_probability": 0.138951,
+      "documented_state": "UNCERTAIN",
+      "documented_paths": {
+        "single_stretch": 0.138951,
+        "single_preserve": 0.040332,
+        "multicrop_mean": 0.120426
+      }
+    },
+    {
+      "class_dir": "Blueberry___healthy",
+      "path": "validation/external_large/Blueberry___healthy/vaccinium-angustifolium-low-bush-blueberry_0830_124221.jpg",
+      "leaf_probability": 0.372578,
+      "documented_state": "UNCERTAIN",
+      "documented_paths": {
+        "single_stretch": 0.168005,
+        "single_preserve": 0.298851,
+        "multicrop_mean": 0.372578
+      }
+    },
+    {
+      "class_dir": "Tomato___Early_blight",
+      "path": "validation/external_large/Tomato___Early_blight/dscn3175.jpg",
+      "leaf_probability": 0.610422,
+      "documented_state": "UNCERTAIN",
+      "documented_paths": {
+        "single_stretch": 0.446745,
+        "single_preserve": 0.610422,
+        "multicrop_mean": 0.429485
+      }
+    }
+  ],
+  "nonleaf": [
+    {
+      "name": "animal_hardest",
+      "path": "artifacts/leaf_classifier/dataset/nonleaf/animal/7-1-1000x680_10cde79598.jpg",
+      "leaf_probability": 0.610058,
+      "state": "UNCERTAIN",
+      "documented_score": 0.6100574
+    },
+    {
+      "name": "landscape",
+      "path": "artifacts/leaf_classifier/dataset/nonleaf/landscape/Gorge_Bekirov_Jar__80th_years___5297491360__859dce0c04.jpg",
+      "leaf_probability": 0.578354,
+      "state": "UNCERTAIN",
+      "documented_score": 0.5783545
+    },
+    {
+      "name": "rock",
+      "path": "artifacts/leaf_classifier/dataset/nonleaf/rock/Fragmento_de_conglomerado_64c4cda0e4.jpg",
+      "leaf_probability": 0.461065,
+      "state": "UNCERTAIN",
+      "documented_score": 0.4610647
+    }
+  ]
+}
