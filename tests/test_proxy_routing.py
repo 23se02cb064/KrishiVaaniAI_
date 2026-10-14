@@ -96,34 +96,39 @@ def test_proxy_lives_inside_the_root_directory():
         'frontend/api/proxy.js must exist so the @vercel/node build resolves '
         'when Root Directory is frontend')
     src = _read(PROXY_JS)
-    assert 'createProxyMiddleware' in src
+    assert 'createProxyMiddleware' not in src, (
+        'the proxy must not depend on http-proxy-middleware: its ESM-only '
+        'build cannot be require()d by Vercel\'s Node runtime (ERR_REQUIRE_ESM)')
+    assert 'fetch(' in src, 'the proxy must use Node\'s built-in fetch()'
     assert 'RENDER_BACKEND_URL' in src
     assert 'Access-Control-Allow-Origin' in src
 
 
 def test_proxy_forwards_path_and_query_string():
-    """The proxy must not rewrite the incoming path; it forwards it verbatim."""
+    """The proxy must forward the incoming path and query string verbatim to
+    the backend, so routes and query parameters survive the hop."""
     src = _read(PROXY_JS)
-    assert 'pathRewrite' in src, 'the proxy uses pathRewrite'
-    assert 'return path' in src, (
-        'pathRewrite must return the original path unchanged so query strings '
-        'and routes are forwarded verbatim to the backend')
+    assert 'req.url' in src, 'the proxy forwards the incoming URL verbatim'
+    assert 'BASE + incoming' in src, (
+        'the proxy must concatenate the backend base with the incoming path '
+        'and query string unchanged')
 
 
 def test_proxy_error_path_carries_cors():
-    """The proxy must set CORS headers before proxying, so its own error page
-    (502/504) is not blocked by the browser as a CORS violation."""
+    """The proxy must apply CORS before the backend call, so its own error
+    response (502) is not blocked by the browser as a CORS violation."""
     src = _read(PROXY_JS)
     assert 'applyCors' in src, 'the proxy has a CORS helper'
     assert 'Access-Control-Allow-Origin' in src
     assert 'Access-Control-Allow-Credentials' in src
     assert 'Vary' in src
-    # applyCors must run BEFORE the proxy call, not inside the error callback,
-    # because http-proxy-middleware writes its own body on failure and sets
-    # res.headersSent before the callback is reached.
-    assert src.index('applyCors(req, res)') < src.index('apiProxy('), (
-        'applyCors must run before the proxy so error responses carry CORS '
-        'headers even when http-proxy-middleware writes its own body first')
+    # applyCors must run before the backend fetch() call, because the proxy's
+    # own error response is what the browser sees when the backend is
+    # unreachable. Compare the LAST occurrence of applyCors against the LAST
+    # fetch( call: in the exported async handler, applyCors is called first.
+    assert src.rindex('applyCors(req, res)') < src.rindex('fetch('), (
+        'applyCors must run before the backend call so the 502 error page '
+        'carries CORS headers')
 
 
 def test_proxy_requires_backend_url():

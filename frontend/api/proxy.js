@@ -1,10 +1,27 @@
-const { createProxyMiddleware } = require('http-proxy-middleware');
+// Vercel serverless proxy: forwards /api/* to the Render backend.
+//
+// Deliberately dependency-free. http-proxy-middleware ships an ESM-only build
+// that Vercel's Node runtime cannot require() (ERR_REQUIRE_ESM), so this
+// handler uses Node's built-in fetch() instead. That removes the
+// module-format conflict and the 13-package dependency tree entirely.
+//
+// Behaviour preserved from the previous implementation:
+//   - every HTTP method, query string, and request body (including multipart
+//     uploads) is forwarded verbatim to RENDER_BACKEND_URL
+//   - the backend's response status, headers, and body are returned unchanged
+//   - CORS headers are applied before the call, so the proxy's own error page
+//     is not blocked by the browser as a CORS violation
+//   - proxy failures return JSON, never a crash
+//   - secrets and request bodies are never logged
 
 const API_URL = process.env.RENDER_BACKEND_URL;
 
 if (!API_URL) {
   throw new Error('RENDER_BACKEND_URL environment variable is not configured');
 }
+
+// Strip the trailing slash so path concatenation is predictable.
+const BASE = API_URL.replace(/\/+$/, '');
 
 // The same origin allow-list the Flask backend uses, so a proxy-generated
 // error page carries the same CORS contract as a backend-generated one.
@@ -24,37 +41,89 @@ function applyCors(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Vary', 'Origin');
+  // Preflight requests need a short allow-list to succeed.
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods',
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+  return false;
 }
 
-const apiProxy = createProxyMiddleware({
-  target: API_URL,
-  changeOrigin: true,
-  timeout: 30000,
-  proxyTimeout: 30000,
-  pathRewrite: (path, req) => {
-    const originalPath = req.query?.path;
+function buildTarget(req) {
+  // Forward the incoming path and query string verbatim. The incoming path on
+  // Vercel is already /api/... because vercel.json routes /api/(.*) here.
+  const incoming = req.url || '/';
+  return BASE + incoming;
+}
 
-    if (typeof originalPath === 'string') {
-      return `/api/${originalPath}`;
-    }
-
-    return path;
+function forwardHeaders(req) {
+  const headers = {};
+  for (const [key, value] of Object.entries(req.headers || {})) {
+    // hop-by-hop headers must not be forwarded.
+    if (key === 'host' || key === 'content-length') continue;
+    headers[key] = value;
   }
-});
+  return headers;
+}
 
-module.exports = (req, res) => {
-  // Apply CORS headers BEFORE the proxy runs. http-proxy-middleware writes its
-  // own error body on failure, which sets res.headersSent before this module's
-  // error callback is reached; checking headersSent afterwards therefore
-  // misses it. Setting the headers up front guarantees the 502/504 error page
-  // carries the same CORS contract as a backend-generated response, so the
-  // browser does not block it as a CORS violation.
-  applyCors(req, res);
-  apiProxy(req, res, (err) => {
-    console.error('Proxy error:', err);
-
-    if (!res.headersSent) {
-      res.status(502).json({ error: 'Backend proxy error' });
-    }
+async function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
   });
+}
+
+module.exports = async (req, res) => {
+  // CORS must be applied before any downstream work, because the proxy's own
+  // error response is the one the browser will see if the backend is
+  // unreachable. http-proxy-middleware used to write its own body first and
+  // bypass this, which is exactly the "missing Access-Control-Allow-Origin"
+  // error reported in production.
+  if (applyCors(req, res)) return;
+
+  const target = buildTarget(req);
+  let body = undefined;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    body = await readBody(req);
+  }
+
+  let upstream;
+  try {
+    upstream = await fetch(target, {
+      method: req.method,
+      headers: forwardHeaders(req),
+      body: body && body.length ? body : undefined,
+      // The backend can be slow on the free tier; give it room but not forever.
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (err) {
+    // Connection refused, DNS failure, or timeout. Return JSON with CORS so
+    // the browser can read it instead of blocking the page as a CORS error.
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Backend proxy error' }));
+    return;
+  }
+
+  // Copy the upstream status and headers back, then stream the body.
+  res.writeHead(upstream.status, Object.fromEntries(upstream.headers.entries()));
+  const reader = upstream.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+  } catch (err) {
+    // The client went away early; there is nothing useful to return.
+  } finally {
+    res.end();
+  }
 };
