@@ -3,11 +3,16 @@
 These guard the production wiring:
   1. The frontend must call relative /api/... URLs, never a hardcoded Render
      host, so every request goes through the Vercel same-origin proxy.
-  2. The proxy must forward query strings, methods, and response bodies
+  2. The proxy must live INSIDE the Vercel root directory
+     (frontend/api/proxy.js), because vercel.json is read from there and its
+     build sources are resolved relative to it. The unsupported
+     rootDirectory property must never appear in vercel.json.
+  3. The proxy must forward query strings, methods, and response bodies
      unchanged, and must carry CORS headers on its own error responses.
 
 They are source-level tests (no network, no deploy): they parse the frontend
-source and the proxy module and assert on the wiring that matters.
+source, the proxy module, and the vercel.json files and assert on the wiring
+that matters.
 """
 
 import json
@@ -19,8 +24,9 @@ ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, ROOT)
 
 API_JS = os.path.join(ROOT, 'frontend', 'src', 'api.js')
-PROXY_JS = os.path.join(ROOT, 'api', 'proxy.js')
-VERCEL_JSON = os.path.join(ROOT, 'vercel.json')
+PROXY_JS = os.path.join(ROOT, 'frontend', 'api', 'proxy.js')
+FRONTEND_VERCEL_JSON = os.path.join(ROOT, 'frontend', 'vercel.json')
+ROOT_VERCEL_JSON = os.path.join(ROOT, 'vercel.json')
 
 
 def _read(path):
@@ -52,21 +58,47 @@ def test_api_base_url_has_no_default_render_host():
         % match.group(1))
 
 
-def test_proxy_routes_every_api_path():
-    """vercel.json must route /api/* through @vercel/node."""
-    cfg = json.load(open(VERCEL_JSON))
+def test_frontend_vercel_json_is_valid_and_routes_api():
+    """With Vercel Root Directory = frontend, frontend/vercel.json is the file
+    Vercel actually reads. It must build index.html (@vercel/static) and
+    api/proxy.js (@vercel/node) and route /api/* through the proxy. It must
+    NOT use the unsupported rootDirectory property, which fails schema
+    validation. All build sources must exist relative to the frontend dir.
+    """
+    path = FRONTEND_VERCEL_JSON
+    assert os.path.exists(path), (
+        'frontend/vercel.json must exist: with Root Directory=frontend, Vercel '
+        'ignores the repo-root vercel.json and never builds api/proxy.js')
+    cfg = json.load(open(path))
+    assert 'rootDirectory' not in cfg, (
+        'vercel.json schema forbids rootDirectory; it is a project-level '
+        'setting, not a config property. Put api/proxy.js inside the root '
+        'directory instead.')
     builds = {b['src']: b['use'] for b in cfg.get('builds', [])}
-    assert 'api/proxy.js' in builds, (
-        'vercel.json must build api/proxy.js with @vercel/node; builds=%s'
-        % builds)
-    assert builds['api/proxy.js'] == '@vercel/node'
+    assert 'api/proxy.js' in builds and builds['api/proxy.js'] == '@vercel/node'
+    assert 'index.html' in builds and builds['index.html'] == '@vercel/static'
     routes = cfg.get('routes', [])
-    api_route = next((r for r in routes if r.get('src') == '/api/(.*)'), None)
-    assert api_route is not None, (
-        'vercel.json must route /api/(.*) to the proxy; routes=%s' % routes)
-    assert api_route['dest'] == '/api/proxy.js'
-    spa = next((r for r in routes if r.get('src') == '/(.*)'), None)
-    assert spa is not None and spa['dest'] == '/index.html'
+    assert any(r.get('src') == '/api/(.*)' and r.get('dest') == '/api/proxy.js'
+               for r in routes)
+    assert any(r.get('src') == '/(.*)' and r.get('dest') == '/index.html'
+               for r in routes)
+    for src in builds:
+        assert os.path.exists(os.path.join(ROOT, 'frontend', src)), (
+            'vercel.json build source %r does not exist under frontend/, so '
+            'the build would fail' % src)
+
+
+def test_proxy_lives_inside_the_root_directory():
+    """The deployed proxy must live inside the Vercel root directory
+    (frontend/api/proxy.js), because vercel.json is read from there and its
+    build sources are resolved relative to it."""
+    assert os.path.exists(PROXY_JS), (
+        'frontend/api/proxy.js must exist so the @vercel/node build resolves '
+        'when Root Directory is frontend')
+    src = _read(PROXY_JS)
+    assert 'createProxyMiddleware' in src
+    assert 'RENDER_BACKEND_URL' in src
+    assert 'Access-Control-Allow-Origin' in src
 
 
 def test_proxy_forwards_path_and_query_string():
@@ -102,39 +134,12 @@ def test_proxy_requires_backend_url():
             "is not configured')") in src
 
 
-def test_frontend_vercel_json_overrides_root_directory():
-    """Vercel reads vercel.json from the project's root directory. When the
-    Vercel Root Directory is set to `frontend`, the repo-root vercel.json is
-    ignored and no @vercel/node build or /api route exists, so every /api/*
-    request returns 404. A frontend/vercel.json must override rootDirectory
-    back to the repo root so the existing api/proxy.js and index.html resolve.
-    """
-    import json
-    path = os.path.join(ROOT, 'frontend', 'vercel.json')
-    assert os.path.exists(path), (
-        'frontend/vercel.json must exist: with Root Directory=frontend, Vercel '
-        'ignores the repo-root vercel.json and never builds api/proxy.js')
-    cfg = json.load(open(path))
-    assert cfg.get('rootDirectory') == '..', (
-        'frontend/vercel.json must set rootDirectory back to the repo root, '
-        'got %r' % cfg.get('rootDirectory'))
-    builds = {b['src']: b['use'] for b in cfg.get('builds', [])}
-    assert 'api/proxy.js' in builds and builds['api/proxy.js'] == '@vercel/node'
-    routes = cfg.get('routes', [])
-    assert any(r.get('src') == '/api/(.*)' and r.get('dest') == '/api/proxy.js'
-               for r in routes)
-    assert any(r.get('src') == '/(.*)' and r.get('dest') == '/index.html'
-               for r in routes)
-    # Every build source must actually exist relative to the repo root.
-    for src in builds:
-        assert os.path.exists(os.path.join(ROOT, src)), (
-            'vercel.json build source %r does not exist at the repo root, so '
-            'the @vercel/node build would fail' % src)
-
-
-def test_no_second_api_directory_under_frontend():
-    """There must be exactly one api/proxy.js, at the repo root."""
-    assert os.path.exists(PROXY_JS)
-    assert not os.path.exists(os.path.join(ROOT, 'frontend', 'api', 'proxy.js')), (
-        'a second api/proxy.js under frontend/ would duplicate the proxy; '
-        'keep the single repo-root proxy and route to it via frontend/vercel.json')
+def test_no_unsupported_vercel_json_property():
+    """Neither vercel.json file may use a property the schema rejects."""
+    for path in (FRONTEND_VERCEL_JSON, ROOT_VERCEL_JSON):
+        if not os.path.exists(path):
+            continue
+        cfg = json.load(open(path))
+        for forbidden in ('rootDirectory', 'rootDirectory', 'rootDir'):
+            assert forbidden not in cfg, (
+                '%s: vercel.json schema rejects %r' % (path, forbidden))

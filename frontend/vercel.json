@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "rootDirectory": "..",
   "builds": [
     {
       "src": "index.html",
