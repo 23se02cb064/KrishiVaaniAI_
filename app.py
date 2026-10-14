@@ -221,6 +221,18 @@ OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'openai/gpt-4.1-mini')
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 NVIDIA_API_KEY = os.getenv('NVIDIA_API_KEY')
+# The default NVIDIA model (meta/llama-3.3-70b-instruct) was retired by NVIDIA
+# on 2026-08-26 and now answers HTTP 410. The NVIDIA provider is therefore
+# DISABLED by default so the advisory chain no longer burns the 5s client
+# timeout on every request and logs a misleading 410. The OpenRouter fallback
+# (which answers 200) continues unchanged.
+#
+# To re-enable NVIDIA you must ALSO set NVIDIA_MODEL to a model that is
+# currently live on this account's integrate.api.nvidia.com quota, e.g.:
+#     NVIDIA_ENABLED=1 NVIDIA_MODEL=nvidia/llama-3.3-70b-instruct
+# A key alone is not enough: without a verified live model the provider stays
+# off, so a dead default can never silently delay production traffic again.
+NVIDIA_ENABLED = os.getenv('NVIDIA_ENABLED', '0').strip().lower() in ('1', 'true', 'yes')
 NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'meta/llama-3.3-70b-instruct')
 # Total wall-clock budget for the whole advisory fallback chain of one request.
 # Without it a request waits for every configured provider in turn (up to ~45s
@@ -244,7 +256,9 @@ if not OPENWEATHER_API_KEY:
 if not GEMINI_API_KEY:
     missing.append('GEMINI_API_KEY')
 if not NVIDIA_API_KEY:
-    missing.append('NVIDIA_API_KEY')
+    if NVIDIA_ENABLED:
+        missing.append('NVIDIA_API_KEY')
+    # NVIDIA is disabled by default, so a missing key is not a warning.
 if missing:
     logger.warning('Missing optional environment variables: %s', ', '.join(missing))
 
@@ -259,7 +273,7 @@ class AIService:
         self._init_clients()
 
     def _init_clients(self):
-        if NVIDIA_API_KEY:
+        if NVIDIA_ENABLED and NVIDIA_API_KEY:
             try:
                 self.nvidia_client = OpenAI(
                     base_url="https://integrate.api.nvidia.com/v1",
@@ -267,9 +281,18 @@ class AIService:
                     timeout=5.0,
                     max_retries=0,
                 )
-                logger.info('NVIDIA client initialized')
+                logger.info('NVIDIA client initialized (model=%s)', NVIDIA_MODEL)
             except Exception as e:
                 logger.error('Failed to initialize NVIDIA client: %s', e, exc_info=True)
+        elif NVIDIA_API_KEY:
+            # Key present but provider disabled: the default model is retired,
+            # and no verified live replacement is on file, so skip it rather
+            # than burn the 5s client timeout on every request.
+            logger.warning(
+                'NVIDIA provider disabled (NVIDIA_ENABLED not set). The '
+                'default model %s was retired 2026-08-26. Set NVIDIA_ENABLED=1 '
+                'with a verified live NVIDIA_MODEL to re-enable it.',
+                NVIDIA_MODEL)
 
         if OPENROUTER_API_KEY:
             try:
