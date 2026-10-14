@@ -60,10 +60,10 @@ def test_api_base_url_has_no_default_render_host():
 
 def test_frontend_vercel_json_is_valid_and_routes_api():
     """With Vercel Root Directory = frontend, frontend/vercel.json is the file
-    Vercel actually reads. It must build index.html (@vercel/static) and
-    api/proxy.js (@vercel/node) and route /api/* through the proxy. It must
-    NOT use the unsupported rootDirectory property, which fails schema
-    validation. All build sources must exist relative to the frontend dir.
+    Vercel actually reads. It must declare a build command that produces the
+    full dist/ directory (so JS/CSS/images are published), route /api/* through
+    the proxy, and serve the SPA on every other path. It must NOT use the
+    unsupported rootDirectory property, which fails schema validation.
     """
     path = FRONTEND_VERCEL_JSON
     assert os.path.exists(path), (
@@ -74,18 +74,54 @@ def test_frontend_vercel_json_is_valid_and_routes_api():
         'vercel.json schema forbids rootDirectory; it is a project-level '
         'setting, not a config property. Put api/proxy.js inside the root '
         'directory instead.')
-    builds = {b['src']: b['use'] for b in cfg.get('builds', [])}
-    assert 'api/proxy.js' in builds and builds['api/proxy.js'] == '@vercel/node'
-    assert 'index.html' in builds and builds['index.html'] == '@vercel/static'
+    assert cfg.get('buildCommand') == 'npm run build', (
+        'vercel.json must declare npm run build so Vite produces the full '
+        'dist/ directory (index.html + assets/) that Vercel publishes')
+    assert 'builds' not in cfg, (
+        'vercel.json must NOT use the legacy builds array with @vercel/static: '
+        '@vercel/static copies only the single entry file it is given, so the '
+        'app\'s JS and CSS in dist/assets/ would be unreachable (404) at '
+        'runtime. Use Vercel\'s native Vite framework integration instead.')
     routes = cfg.get('routes', [])
     assert any(r.get('src') == '/api/(.*)' and r.get('dest') == '/api/proxy.js'
-               for r in routes)
-    assert any(r.get('src') == '/(.*)' and r.get('dest') == '/index.html'
-               for r in routes)
-    for src in builds:
-        assert os.path.exists(os.path.join(ROOT, 'frontend', src)), (
-            'vercel.json build source %r does not exist under frontend/, so '
-            'the build would fail' % src)
+               for r in routes), (
+        'vercel.json must route /api/* through the proxy verbatim')
+    # The SPA fallback must NOT be in routes: a catch-all in routes would
+    # rewrite /assets/*.js and /assets/*.css to index.html before the
+    # filesystem is checked, leaving the app a 404 shell. Vercel's documented
+    # SPA pattern puts it in rewrites instead, which checks the filesystem
+    # first and only rewrites paths that have no static file.
+    assert not any(r.get('src') == '/(.*)' for r in routes), (
+        'vercel.json must NOT put the catch-all in routes: it would rewrite '
+        'static assets (dist/assets/*.js, *.css) to index.html before the '
+        'filesystem is checked, so the SPA would be a 404 shell. Use rewrites '
+        'instead, which checks the filesystem first.')
+    rewrites = cfg.get('rewrites', [])
+    assert any(r.get('source') == '/(.*)' and r.get('destination') == '/index.html'
+               for r in rewrites), (
+        'vercel.json must rewrite /(.*) to /index.html in the rewrites array, '
+        'which checks the filesystem first and only rewrites paths that have '
+        'no static file')
+    # The build must actually produce the assets the SPA needs.
+    dist = os.path.join(ROOT, 'frontend', 'dist')
+    assert os.path.exists(os.path.join(dist, 'index.html')), (
+        'npm run build must produce dist/index.html')
+    assets = os.path.join(dist, 'assets')
+    assert os.path.isdir(assets) and os.listdir(assets), (
+        'npm run build must produce dist/assets/ with the app\'s JS and CSS, '
+        'otherwise the SPA is a 404 shell')
+    # The proxy must exist and be ESM (export default), because Vercel copies
+    # the root package.json (type:module) into every function directory.
+    proxy_src = os.path.join(ROOT, 'frontend', 'api', 'proxy.js')
+    assert os.path.exists(proxy_src), 'frontend/api/proxy.js must exist'
+    psrc = _read(proxy_src)
+    assert 'export default' in psrc, (
+        'the proxy must be ESM (export default): Vercel copies the root '
+        'package.json (which carries "type": "module") into every function '
+        'directory, and under "type": "module" a CommonJS module.exports is '
+        'silently ignored, so a CJS proxy would export nothing and every '
+        '/api/* request would 500')
+    assert 'fetch(' in psrc, 'the proxy must use Node\'s built-in fetch()'
 
 
 def test_proxy_lives_inside_the_root_directory():
