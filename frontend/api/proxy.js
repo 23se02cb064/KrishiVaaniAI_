@@ -5,6 +5,13 @@
 // handler uses Node's built-in fetch() instead. That removes the
 // module-format conflict and the 13-package dependency tree entirely.
 //
+// It is also ESM (export default), not CommonJS (module.exports), because
+// Vercel's @vercel/node builder copies the ROOT package.json into every
+// function directory, and this repo's root package.json carries
+// "type": "module" (it is a Vite/ESM app). Under "type": "module" a CommonJS
+// module.exports is silently ignored, so a CommonJS proxy would export
+// nothing and every /api/* request would 500.
+//
 // Behaviour preserved from the previous implementation:
 //   - every HTTP method, query string, and request body (including multipart
 //     uploads) is forwarded verbatim to RENDER_BACKEND_URL
@@ -81,7 +88,13 @@ async function readBody(req) {
   });
 }
 
-module.exports = async (req, res) => {
+// ESM export. Vercel's @vercel/node builder copies the ROOT package.json
+// (which carries "type": "module" because this is a Vite/ESM app) into every
+// function directory. Under "type": "module" a CommonJS module.exports is
+// silently ignored, so the deployed function would export nothing and every
+// /api/* request would 500. export default is what the Vercel Node runtime
+// loader calls, so it works regardless of which package.json is present.
+export default async (req, res) => {
   // CORS must be applied before any downstream work, because the proxy's own
   // error response is the one the browser will see if the backend is
   // unreachable. http-proxy-middleware used to write its own body first and

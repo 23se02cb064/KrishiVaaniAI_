@@ -175,6 +175,27 @@ def test_proxy_requires_backend_url():
             "is not configured')") in src
 
 
+def test_proxy_is_pure_esm_with_no_commonjs_exports():
+    """The deployed handler must be a pure ES module. Vercel's @vercel/node
+    builder copies the ROOT package.json (which carries "type": "module")
+    into every function directory. Under "type": "module" any CommonJS
+    reference is a ReferenceError, so the deployed function must not contain
+    module.exports, exports.<x>, or require(...) outside of comments."""
+    src = _read(PROXY_JS)
+    lines = src.splitlines()
+    code_lines = [ln for ln in lines if not ln.lstrip().startswith('//')]
+    code = '\n'.join(code_lines)
+    assert 'export default' in code, (
+        'the proxy must export default async (req, res) => {...}')
+    for forbidden in ('module.exports', 'exports.handler', 'exports.default',
+                      'require('):
+        assert forbidden not in code, (
+            'the proxy must not contain %r outside comments: under '
+            '"type": "module" that is a ReferenceError at runtime, which is '
+            'exactly the production failure "module is not defined in ES '
+            'module scope"' % forbidden)
+
+
 def test_no_unsupported_vercel_json_property():
     """Neither vercel.json file may use a property the schema rejects."""
     for path in (FRONTEND_VERCEL_JSON, ROOT_VERCEL_JSON):
