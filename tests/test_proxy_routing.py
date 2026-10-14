@@ -100,3 +100,41 @@ def test_proxy_requires_backend_url():
     assert 'RENDER_BACKEND_URL' in src
     assert ("throw new Error('RENDER_BACKEND_URL environment variable "
             "is not configured')") in src
+
+
+def test_frontend_vercel_json_overrides_root_directory():
+    """Vercel reads vercel.json from the project's root directory. When the
+    Vercel Root Directory is set to `frontend`, the repo-root vercel.json is
+    ignored and no @vercel/node build or /api route exists, so every /api/*
+    request returns 404. A frontend/vercel.json must override rootDirectory
+    back to the repo root so the existing api/proxy.js and index.html resolve.
+    """
+    import json
+    path = os.path.join(ROOT, 'frontend', 'vercel.json')
+    assert os.path.exists(path), (
+        'frontend/vercel.json must exist: with Root Directory=frontend, Vercel '
+        'ignores the repo-root vercel.json and never builds api/proxy.js')
+    cfg = json.load(open(path))
+    assert cfg.get('rootDirectory') == '..', (
+        'frontend/vercel.json must set rootDirectory back to the repo root, '
+        'got %r' % cfg.get('rootDirectory'))
+    builds = {b['src']: b['use'] for b in cfg.get('builds', [])}
+    assert 'api/proxy.js' in builds and builds['api/proxy.js'] == '@vercel/node'
+    routes = cfg.get('routes', [])
+    assert any(r.get('src') == '/api/(.*)' and r.get('dest') == '/api/proxy.js'
+               for r in routes)
+    assert any(r.get('src') == '/(.*)' and r.get('dest') == '/index.html'
+               for r in routes)
+    # Every build source must actually exist relative to the repo root.
+    for src in builds:
+        assert os.path.exists(os.path.join(ROOT, src)), (
+            'vercel.json build source %r does not exist at the repo root, so '
+            'the @vercel/node build would fail' % src)
+
+
+def test_no_second_api_directory_under_frontend():
+    """There must be exactly one api/proxy.js, at the repo root."""
+    assert os.path.exists(PROXY_JS)
+    assert not os.path.exists(os.path.join(ROOT, 'frontend', 'api', 'proxy.js')), (
+        'a second api/proxy.js under frontend/ would duplicate the proxy; '
+        'keep the single repo-root proxy and route to it via frontend/vercel.json')

@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rootDirectory": "..",
+  "builds": [
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "api/proxy.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/sw.js", "dest": "/sw.js" },
+    { "src": "/manifest.json", "dest": "/manifest.json" },
+    { "src": "/api/(.*)", "dest": "/api/proxy.js" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}
