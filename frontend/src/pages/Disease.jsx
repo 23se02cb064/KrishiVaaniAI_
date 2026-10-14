@@ -15,6 +15,10 @@ export default function Disease() {
   // a leaf" from "this leaf could not be diagnosed confidently" and from a transport
   // failure. The backend returns no class, confidence, Grad-CAM or remedy in all three.
   const [gateRefusal, setGateRefusal] = useState(null);
+  // Guards against double submission: a second click while a request is in
+  // flight used to queue a duplicate analysis behind the first one, doubling
+  // the load on a single-worker backend.
+  const inFlightRef = useRef(false);
 
   const handleFile = useCallback((file) => {
     if (!file) return;
@@ -50,12 +54,24 @@ export default function Disease() {
       setError('Please select a leaf image first.');
       return;
     }
-
+    // Never start a second analysis while one is already in flight. A repeat
+    // click would otherwise queue a duplicate request behind the first and
+    // double the load on the single-worker backend.
+    if (inFlightRef.current) {
+      setError('An analysis is already in progress. Please wait.');
+      return;
+    }
+    inFlightRef.current = true;
     setLoading(true);
     setError('');
     setResult(null);
     setGateRefusal(null);
 
+    // The backend is on a shared free tier and can be slow or return a
+    // gateway-generated HTML page. Give the request a client-side bound and
+    // never assume the body is JSON.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
     try {
       const formData = new FormData();
       formData.append('image', file);
@@ -63,24 +79,62 @@ export default function Disease() {
       formData.append('include_gradcam', 'true');
       formData.append('source', source);
 
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/analyze`, { method: 'POST', body: formData });
-      const data = await res.json();
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL || ''}/api/analyze`,
+        { method: 'POST', body: formData, signal: controller.signal });
 
-      // The leaf gate refuses the image before classification with HTTP 422. That is a
-      // deliberate "no diagnosis", not a server fault, so it gets its own presentation
-      // instead of being reported as an analysis error.
+      // Read the body as text first. A 502 from a gateway is HTML, and calling
+      // res.json() on it throws "Unexpected token '<'", which the catch below
+      // then reported as a bare JSON parse error. Reading the text lets us
+      // distinguish a real API error from a transport failure.
+      const raw = await res.text();
+      let data = null;
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch (parseErr) {
+          // Non-JSON body: a gateway error page, an empty response, or a
+          // chunked response that arrived incomplete. None of these is a
+          // client bug, so report it as a server-side transport failure.
+          const head = raw.trim().slice(0, 60).replace(/\s+/g, ' ');
+          throw new Error(
+            `Server returned an unexpected response (HTTP ${res.status}). ` +
+            `This usually means the analysis is taking too long on the ` +
+            `server. Please try again in a moment.`);
+        }
+      }
+
+      // The leaf gate refuses the image before classification with HTTP 422.
+      // That is a deliberate "no diagnosis", not a server fault, so it gets its
+      // own presentation instead of being reported as an analysis error.
       if (!res.ok) {
         if (data && data.error_type) {
           setGateRefusal({ message: data.error, errorType: data.error_type });
           return;
         }
-        throw new Error((data && data.error) || 'Analysis failed');
+        throw new Error((data && data.error) ||
+          `Analysis failed (HTTP ${res.status}). Please try again.`);
+      }
+
+      if (!data || typeof data.class === 'undefined') {
+        throw new Error('Server returned a response without a prediction. '
+          + 'Please try again.');
       }
 
       setResult(data);
     } catch (err) {
-      setError(err.message || 'Failed to analyze image. Please try again.');
+      if (err.name === 'AbortError') {
+        setError('The analysis is taking longer than expected. The server may '
+          + 'be busy. Please try again shortly.');
+      } else if (err.message && err.message.includes('Failed to fetch')) {
+        setError('Could not reach the analysis server. Please check your '
+          + 'connection and try again.');
+      } else {
+        setError(err.message || 'Failed to analyze image. Please try again.');
+      }
     } finally {
+      clearTimeout(timer);
+      inFlightRef.current = false;
       setLoading(false);
     }
   };

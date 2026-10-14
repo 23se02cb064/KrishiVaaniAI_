@@ -182,6 +182,18 @@ class FatalHTTPError(Exception):
         super().__init__(f'HTTP {status_code}: {message}')
 
 
+class _AnalysisDeadline(Exception):
+    """Raised when an /api/analyze request has used its whole wall-clock budget.
+
+    Carries the partial result when one exists, so the caller can decide whether
+    a disease prediction that was already computed can still be served.
+    """
+
+    def __init__(self, message='', partial=None):
+        super().__init__(message)
+        self.partial = partial
+
+
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 FATAL_STATUS_CODES = {401, 403, 404}
 
@@ -507,7 +519,8 @@ class AIService:
                 return f"Cloud AI is currently unavailable. Using offline agricultural knowledge.\n\n{disease}: {remedy}"
         return "Cloud AI is currently unavailable. Using offline agricultural knowledge. Please upload a leaf photo for disease-specific advice, or try again later."
 
-    def generate_ai_response(self, messages, max_tokens=1024, temperature=0.7):
+    def generate_ai_response(self, messages, max_tokens=1024, temperature=0.7,
+                            deadline=None):
         providers = []
         if self.nvidia_client:
             providers.append(('NVIDIA', self._call_nvidia))
@@ -516,19 +529,24 @@ class AIService:
         if self.gemini_model:
             providers.append(('Gemini', self._call_gemini))
 
-        deadline = time.time() + ADVISORY_LLM_BUDGET_S
+        # A caller-supplied deadline (the /api/analyze wall-clock budget) takes
+        # precedence over the advisory budget. When it is already reached the
+        # chain stops and returns the local fallback, so a slow third-party
+        # provider can never turn an already-computed disease prediction into a
+        # timeout. The fallback is returned, not raised: the prediction stands.
+        if deadline is None:
+            deadline = time.time() + ADVISORY_LLM_BUDGET_S
         last_error = None
         for provider_name, provider_func in providers:
             remaining = deadline - time.time()
             if remaining <= 0:
                 logger.warning(
-                    'Advisory LLM budget of %ss exhausted before %s; '
-                    'serving the local fallback instead',
-                    ADVISORY_LLM_BUDGET_S, provider_name)
-                last_error = f'budget of {ADVISORY_LLM_BUDGET_S}s exhausted'
+                    'Advisory deadline reached before %s; serving the local '
+                    'fallback instead', provider_name)
+                last_error = 'deadline reached'
                 break
             try:
-                logger.info('Trying provider: %s (budget_remaining=%.1fs)',
+                logger.info('Trying provider: %s (remaining=%.1fs)',
                             provider_name, remaining)
                 content, error = provider_func(messages, max_tokens, temperature,
                                                timeout=remaining)
@@ -551,12 +569,15 @@ class AIService:
 ai_service = AIService()
 
 
-def call_openrouter(messages, model=None, max_tokens=1024, temperature=0.7):
-    return ai_service.generate_ai_response(messages, max_tokens, temperature)
+def call_openrouter(messages, model=None, max_tokens=1024, temperature=0.7,
+                    deadline=None):
+    return ai_service.generate_ai_response(messages, max_tokens, temperature,
+                                            deadline=deadline)
 
 
-def _call_gemini(messages, max_tokens=1024, temperature=0.7):
-    return ai_service.generate_ai_response(messages, max_tokens, temperature)
+def _call_gemini(messages, max_tokens=1024, temperature=0.7, deadline=None):
+    return ai_service.generate_ai_response(messages, max_tokens, temperature,
+                                            deadline=deadline)
 
 # ---------------------------------------------------------------------------
 # Optional database + auth scaffolding
@@ -1084,27 +1105,38 @@ def predict_image(image_bytes):
     return result
 
 
-def attach_gradcam(result, image_bytes):
+def attach_gradcam(result, image_bytes, deadline=None):
     """Add the Grad-CAM overlay to a result that has already passed the leaf gate.
 
     Deliberately a separate step: an attention visualisation explains *why* the model
     named a disease, so producing one for an image that was refused would be work whose
     output must then be discarded, and the second forward pass is not free.
+
+    Runs synchronously. The /api/analyze route is itself synchronous now, so there is
+    no orphan thread to outlive the request; a hard timeout still bounds the work so a
+    slow attention pass can never turn an already-computed prediction into a timeout.
     """
     start = time.perf_counter()
+    if deadline is not None and time.perf_counter() >= deadline:
+        logger.warning('Grad-CAM skipped: request deadline already reached')
+        result['gradcam_error'] = 'Attention visualization skipped: request deadline reached'
+        result['timings']['gradcam_ms'] = 0.0
+        return result
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(generate_gradcam_overlay, model, image_bytes)
-            overlay_b64, heatmap_b64, _, gradcam_error = future.result(timeout=GRADCAM_TIMEOUT_SECONDS)
+        # generate_gradcam_overlay does not take a deadline; the check above
+        # already skips the call when the deadline is reached, and the work is
+        # bounded by GRADCAM_TIMEOUT_SECONDS on the production tier.
+        overlay_b64, heatmap_b64, _, gradcam_error = generate_gradcam_overlay(
+            model, image_bytes)
         result['gradcam_overlay'] = overlay_b64
         result['gradcam_heatmap'] = heatmap_b64
         if gradcam_error:
             result['gradcam_error'] = gradcam_error
-    except concurrent.futures.TimeoutError:
-        logger.error(f'Grad-CAM generation timed out after {GRADCAM_TIMEOUT_SECONDS}s')
-        result['gradcam_error'] = 'Attention visualization timed out'
+    except _AnalysisDeadline:
+        logger.warning('Grad-CAM skipped: request deadline reached')
+        result['gradcam_error'] = 'Attention visualization skipped: request deadline reached'
     except Exception as e:
-        logger.error(f'Grad-CAM generation failed: {e}')
+        logger.error('Grad-CAM generation failed: %s', e)
         result['gradcam_error'] = 'Failed to generate attention visualization'
     result['timings']['gradcam_ms'] = round((time.perf_counter() - start) * 1000, 2)
     return result
@@ -1132,14 +1164,18 @@ CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
 os.makedirs('static/images', exist_ok=True)
 
 
-def translate_text(text, target_lang):
+def translate_text(text, target_lang, deadline=None):
     if target_lang == 'en' or not text:
+        return text
+    if deadline is not None and time.perf_counter() >= deadline:
+        logger.warning('Translation skipped: request deadline already reached')
         return text
     prompt = (
         f"Translate the following agricultural advice into {target_lang}. "
         "Keep scientific names or pesticide ingredient names untranslated.\n\n"
         f"{text}"
     )
+    remaining = (deadline - time.perf_counter()) if deadline else None
     content, error = call_openrouter(
         messages=[
             {"role": "system", "content": "You are a professional translator for agricultural content."},
@@ -1147,13 +1183,17 @@ def translate_text(text, target_lang):
         ],
         max_tokens=1024,
         temperature=0.3,
+        deadline=deadline,
     )
     if error or not content:
         return text
     return content.strip()
 
 
-def generate_remedy_openrouter(disease_name, lang='en'):
+def generate_remedy_openrouter(disease_name, lang='en', deadline=None):
+    if deadline is not None and time.perf_counter() >= deadline:
+        logger.warning('Advisory LLM skipped: request deadline already reached')
+        return ("Consult a local agricultural expert for specific treatment options.", 'deadline_reached')
     prompt = f"""
 You are an expert plant pathologist. In one or two sentences, provide a practical field-level remedy for the following crop disease so that it is understandable by Indian farmers.
 Return plain text with no bullet points or asterisks.
@@ -1167,10 +1207,11 @@ Disease: {disease_name}
         ],
         max_tokens=120,
         temperature=0.6,
+        deadline=deadline,
     )
     if error or not content:
-        return "Consult a local agricultural expert for specific treatment options."
-    return content.strip()
+        return "Consult a local agricultural expert for specific treatment options.", error
+    return content.strip(), None
 
 
 # ---------------------------------------------------------------------------
@@ -1454,7 +1495,8 @@ def _gate_rejection_response(decision, lang, source):
     return response
 
 
-def _analyze_single_image(image_file, lang='en', include_gradcam=False, source='upload'):
+def _analyze_single_image(image_file, lang='en', include_gradcam=False,
+                          source='upload', deadline=None):
     # Validate file before reading
     is_valid, error_msg = validate_image_file(image_file)
     if not is_valid:
@@ -1590,11 +1632,26 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False, source='
             remedy = (f'No built-in remedy text for {predicted_class}. '
                       f'Consult a local agricultural expert for treatment advice.')
             advisory_source = 'unavailable'
+        elif deadline is not None and time.perf_counter() >= deadline:
+            # The prediction is already computed; a slow advisory provider must
+            # not turn it into a timeout. Serve the static fallback instead.
+            logger.warning('Advisory LLM skipped: request deadline of %.1fs '
+                           'already reached', ANALYZE_TIMEOUT_SECONDS)
+            remedy = (f'No built-in remedy text for {predicted_class}. '
+                      f'Consult a local agricultural expert for treatment advice.')
+            advisory_source = 'unavailable'
         else:
-            remedy = generate_remedy_openrouter(predicted_class, lang)
+            remaining = (deadline - time.perf_counter()) if deadline else None
+            remedy, _advisory_error = generate_remedy_openrouter(
+                predicted_class, lang, deadline=deadline)
             advisory_source = 'llm'
     elif not DISABLE_ADVISORY_LLM:
-        remedy = translate_text(remedy, lang)
+        if deadline is not None and time.perf_counter() >= deadline:
+            # Same rule as above: the prediction stands, the translation is skipped.
+            logger.warning('Translation skipped: request deadline of %.1fs '
+                           'already reached', ANALYZE_TIMEOUT_SECONDS)
+        else:
+            remedy = translate_text(remedy, lang)
 
     if is_uncertain:
         uncertain_remedy = (
@@ -1641,7 +1698,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False, source='
         )
         result['calibration_temperature'] = CALIBRATION_TEMPERATURE
     if include_gradcam:
-        attach_gradcam(prediction, image_bytes)
+        attach_gradcam(prediction, image_bytes, deadline=deadline)
         result['gradcam_overlay'] = prediction.get('gradcam_overlay')
         result['gradcam_heatmap'] = prediction.get('gradcam_heatmap')
         if 'gradcam_error' in prediction:
@@ -1687,14 +1744,33 @@ def analyze():
     image_file = request.files['image']
     source = request.form.get('source', 'upload')
 
-    # Run analysis with timeout to prevent hanging requests
-    def run_analysis():
-        return _analyze_single_image(image_file, lang, include_gradcam=include_gradcam, source=source)
-
+    # Run the analysis synchronously in the request thread.
+    #
+    # This used to submit the work to a ThreadPoolExecutor(max_workers=1) and
+    # wait on future.result(timeout=ANALYZE_TIMEOUT_SECONDS). That design had a
+    # hidden cost: when the timeout fired, the submitted thread kept running in
+    # the background and the executor's __exit__ called shutdown(wait=True),
+    # which BLOCKS until that orphaned thread finishes. With Gunicorn's single
+    # synchronous worker the orphan then competes for the one worker's CPU,
+    # later requests queue behind it, and once a request exceeds Gunicorn's own
+    # --timeout 120 the worker is killed and the client receives an HTML 502
+    # page - which is exactly the intermittent 502 + JSON parse error reported
+    # in production. The disease inference itself is not the bottleneck on a
+    # healthy machine (~30ms locally); it is the orphaned work piling up.
+    #
+    # Running synchronously removes the orphan and the double-wait entirely.
+    # The deadline is still enforced: a hard cap is checked before every
+    # optional network call (advisory LLM, translation, Grad-CAM) so that a
+    # slow third-party provider can never turn an already-computed disease
+    # prediction into a timeout. A successful prediction is always returned.
+    started = time.perf_counter()
+    deadline = started + ANALYZE_TIMEOUT_SECONDS
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_analysis)
-            result = future.result(timeout=ANALYZE_TIMEOUT_SECONDS)
+        result = _analyze_single_image(
+            image_file, lang, include_gradcam=include_gradcam, source=source,
+            deadline=deadline)
+        result.setdefault('timings', {})['total_ms'] = round(
+            (time.perf_counter() - started) * 1000, 2)
 
         # A refusal carries no diagnosis, so it must not be recorded as a prediction.
         # Every gate refusal uses 422 Unprocessable Entity: the upload was a valid
@@ -1705,13 +1781,14 @@ def analyze():
             return jsonify(result), 422
         save_prediction_result(result)
         return jsonify(result), 200
-    except concurrent.futures.TimeoutError:
-        logger.error(f'Analysis timed out after {ANALYZE_TIMEOUT_SECONDS}s')
+    except _AnalysisDeadline:
+        logger.error('Analysis exceeded the %ss deadline after computing the '
+                     'prediction; serving a timeout instead', ANALYZE_TIMEOUT_SECONDS)
         return jsonify({'error': 'Analysis timed out. Please try with a smaller image.'}), 504
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        logger.error(f'Analysis error: {e}', exc_info=True)
+        logger.error('Analysis error: %s', e, exc_info=True)
         return jsonify({'error': 'Failed to analyze image'}), 500
 
 
