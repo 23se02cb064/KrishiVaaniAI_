@@ -888,21 +888,21 @@ REMEDY_MAP = {
     'Apple___Cedar_apple_rust': 'Remove nearby cedar trees if possible and apply fungicides.',
     'Apple___healthy': 'Your plant looks healthy! Maintain good growing conditions.',
     'Blueberry___healthy': 'Your blueberry plant looks healthy! Maintain good growing conditions.',
-    'Cherry___Powdery_mildew': 'Apply sulfur or potassium bicarbonate-based fungicides.',
-    'Cherry___healthy': 'Your cherry plant looks healthy! Maintain good growing conditions.',
-    'Corn___Cercospora_leaf_spot_Gray_leaf_spot': 'Use resistant varieties and apply appropriate fungicides.',
-    'Corn___Common_rust': 'Plant resistant varieties and apply fungicides if necessary.',
-    'Corn___Northern_Leaf_Blight': 'Rotate crops and use resistant varieties.',
-    'Corn___healthy': 'Your corn plant looks healthy! Maintain good growing conditions.',
+    'Cherry_(including_sour)___Powdery_mildew': 'Apply sulfur or potassium bicarbonate-based fungicides.',
+    'Cherry_(including_sour)___healthy': 'Your cherry plant looks healthy! Maintain good growing conditions.',
+    'Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot': 'Use resistant varieties and apply appropriate fungicides.',
+    'Corn_(maize)___Common_rust_': 'Plant resistant varieties and apply fungicides if necessary.',
+    'Corn_(maize)___Northern_Leaf_Blight': 'Rotate crops and use resistant varieties.',
+    'Corn_(maize)___healthy': 'Your corn plant looks healthy! Maintain good growing conditions.',
     'Grape___Black_rot': 'Apply fungicides and remove infected plant material.',
-    'Grape___Esca__Black_Measles_': 'Prune infected vines and apply appropriate treatments.',
-    'Grape___Leaf_blight__Isariopsis_Leaf_Spot_': 'Apply fungicides and improve air circulation.',
+    'Grape___Esca_(Black_Measles)': 'Prune infected vines and apply appropriate treatments.',
+    'Grape___Leaf_blight_(Isariopsis_Leaf_Spot)': 'Apply fungicides and improve air circulation.',
     'Grape___healthy': 'Your grape plant looks healthy! Maintain good growing conditions.',
-    'Orange___Haunglongbing__Citrus_greening_': 'Remove infected trees and control psyllid vectors with insecticides.',
+    'Orange___Haunglongbing_(Citrus_greening)': 'Remove infected trees and control psyllid vectors with insecticides.',
     'Peach___Bacterial_spot': 'Apply copper-based sprays and avoid overhead irrigation.',
     'Peach___healthy': 'Your peach plant looks healthy! Maintain good growing conditions.',
-    'Pepper__bell___Bacterial_spot': 'Apply copper-based fungicides and avoid overhead irrigation.',
-    'Pepper__bell___healthy': 'Your pepper plant looks healthy! Maintain good growing conditions.',
+    'Pepper,_bell___Bacterial_spot': 'Apply copper-based fungicides and avoid overhead irrigation.',
+    'Pepper,_bell___healthy': 'Your pepper plant looks healthy! Maintain good growing conditions.',
     'Potato___Early_blight': 'Rotate crops and apply fungicides preventatively.',
     'Potato___Late_blight': 'Remove and destroy infected plants, apply fungicides.',
     'Potato___healthy': 'Your potato plant looks healthy! Maintain good growing conditions.',
@@ -916,7 +916,7 @@ REMEDY_MAP = {
     'Tomato___Late_blight': 'Remove and destroy infected plants immediately, apply fungicides, and avoid wetting foliage.',
     'Tomato___Leaf_Mold': 'Improve air circulation, reduce humidity, and apply appropriate fungicides.',
     'Tomato___Septoria_leaf_spot': 'Remove infected leaves, avoid overhead watering, and apply fungicides.',
-    'Tomato___Spider_mites_Two-spotted_spider_mite': 'Use insecticidal soap or miticides, and increase humidity around plants.',
+    'Tomato___Spider_mites Two-spotted_spider_mite': 'Use insecticidal soap or miticides, and increase humidity around plants.',
     'Tomato___Target_Spot': 'Apply fungicides, practice crop rotation, and remove infected plant debris.',
     'Tomato___Tomato_Yellow_Leaf_Curl_Virus': 'Control whitefly vectors with insecticides or reflective mulches, and remove infected plants.',
     'Tomato___Tomato_mosaic_virus': 'Remove and destroy infected plants, disinfect tools, and control aphid vectors.',
@@ -1219,6 +1219,7 @@ def serve_manifest():
 
 
 @app.route('/health')
+@limiter.exempt
 def health():
     return jsonify({'status': 'ok', 'model_loaded': model is not None})
 
