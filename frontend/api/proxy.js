@@ -103,6 +103,7 @@ export default async (req, res) => {
   if (applyCors(req, res)) return;
 
   const target = buildTarget(req);
+  const t0 = Date.now();
   let body = undefined;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     body = await readBody(req);
@@ -118,12 +119,39 @@ export default async (req, res) => {
       signal: AbortSignal.timeout(30000),
     });
   } catch (err) {
+    // Safe diagnostics: record the upstream URL PATH (never query params, which
+    // may contain tokens), the elapsed time, and the error category. Never log
+    // request bodies (they contain uploaded image bytes) or authorization
+    // headers (they contain secrets).
+    const elapsed = Date.now() - t0;
+    const category = err.name === 'AbortError' ? 'timeout'
+      : err.name === 'TypeError' ? 'connection'
+      : err.code || err.name || 'unknown';
+    const urlPath = (() => { try { return new URL(target).pathname; } catch { return 'unparseable'; } })();
+    console.warn(JSON.stringify({
+      event: 'proxy_upstream_failure',
+      method: req.method,
+      path: urlPath,
+      elapsed_ms: elapsed,
+      category,
+    }));
     // Connection refused, DNS failure, or timeout. Return JSON with CORS so
     // the browser can read it instead of blocking the page as a CORS error.
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Backend proxy error' }));
     return;
   }
+
+  // Safe success diagnostics: same fields, no bodies, no auth headers.
+  const elapsed = Date.now() - t0;
+  const urlPath = (() => { try { return new URL(target).pathname; } catch { return 'unparseable'; } })();
+  console.info(JSON.stringify({
+    event: 'proxy_upstream_response',
+    method: req.method,
+    path: urlPath,
+    elapsed_ms: elapsed,
+    status: upstream.status,
+  }));
 
   // Copy the upstream status and headers back, then stream the body.
   res.writeHead(upstream.status, Object.fromEntries(upstream.headers.entries()));

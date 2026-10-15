@@ -1765,6 +1765,13 @@ def analyze():
     # prediction into a timeout. A successful prediction is always returned.
     started = time.perf_counter()
     deadline = started + ANALYZE_TIMEOUT_SECONDS
+    # Safe diagnostics: record the source and whether Grad-CAM was requested,
+    # plus the content length of the upload (not the image bytes). Never log
+    # authorization headers or image contents.
+    content_length = request.content_length or 0
+    logger.info('[ANALYZE] start source=%s lang=%s gradcam=%s '
+                'content_length=%s deadline=%.1fs',
+                source, lang, include_gradcam, content_length, ANALYZE_TIMEOUT_SECONDS)
     try:
         result = _analyze_single_image(
             image_file, lang, include_gradcam=include_gradcam, source=source,
@@ -1778,17 +1785,31 @@ def analyze():
         # contract simple, and 422 is already treated as terminal by the offline retry
         # queue in main.js. 415 would have been wrong here: the media type is fine.
         if 'error_type' in result:
+            logger.info('[ANALYZE] end state=REJECTED status=422 elapsed_ms=%.0f '
+                        'reason=%s',
+                        (time.perf_counter() - started) * 1000,
+                        result.get('reason', 'unknown'))
             return jsonify(result), 422
         save_prediction_result(result)
+        logger.info('[ANALYZE] end state=OK status=200 elapsed_ms=%.0f '
+                    'class=%s confidence=%.3f',
+                    (time.perf_counter() - started) * 1000,
+                    result.get('predicted_class', 'unknown'),
+                    result.get('confidence', 0.0))
         return jsonify(result), 200
     except _AnalysisDeadline:
         logger.error('Analysis exceeded the %ss deadline after computing the '
                      'prediction; serving a timeout instead', ANALYZE_TIMEOUT_SECONDS)
         return jsonify({'error': 'Analysis timed out. Please try with a smaller image.'}), 504
     except ValueError as e:
+        logger.warning('[ANALYZE] end state=INVALID status=400 elapsed_ms=%.0f '
+                       'reason=%s',
+                       (time.perf_counter() - started) * 1000, str(e))
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        logger.error('Analysis error: %s', e, exc_info=True)
+        logger.error('[ANALYZE] end state=ERROR status=500 elapsed_ms=%.0f',
+                     (time.perf_counter() - started) * 1000,
+                     exc_info=True)
         return jsonify({'error': 'Failed to analyze image'}), 500
 
 
