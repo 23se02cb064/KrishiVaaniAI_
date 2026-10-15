@@ -154,7 +154,25 @@ export default async (req, res) => {
   }));
 
   // Copy the upstream status and headers back, then stream the body.
-  res.writeHead(upstream.status, Object.fromEntries(upstream.headers.entries()));
+  //
+  // Hop-by-hop and transport-encoding headers MUST be dropped. Node's fetch()
+  // transparently decompresses a gzipped upstream body, so the bytes we stream
+  // here are already plain text; forwarding the upstream "Content-Encoding:
+  // gzip" over them makes every gzip-aware client (browsers, Python requests,
+  // curl --compressed) fail with "incorrect header check" while small, unencoded
+  // error bodies pass through fine. The same applies to Content-Length, which
+  // would now describe the compressed body, not the bytes we actually write.
+  // Transfer-Encoding is hop-by-hop and Vercel re-sets it on the response.
+  const HOP_BY_HOP = new Set([
+    'content-encoding', 'content-length', 'transfer-encoding',
+    'connection', 'keep-alive', 'upgrade',
+  ]);
+  const outHeaders = {};
+  for (const [key, value] of upstream.headers.entries()) {
+    if (HOP_BY_HOP.has(key)) continue;
+    outHeaders[key] = value;
+  }
+  res.writeHead(upstream.status, outHeaders);
   const reader = upstream.body.getReader();
   try {
     while (true) {

@@ -205,3 +205,57 @@ def test_no_unsupported_vercel_json_property():
         for forbidden in ('rootDirectory', 'rootDirectory', 'rootDir'):
             assert forbidden not in cfg, (
                 '%s: vercel.json schema rejects %r' % (path, forbidden))
+
+
+def test_proxy_strips_transport_encoding_headers():
+    """The proxy must NOT forward hop-by-hop / transport-encoding headers.
+
+    Node's fetch() transparently decompresses a gzipped upstream body, so the
+    bytes the proxy streams to the client are already plain text. Copying the
+    upstream "Content-Encoding: gzip" header over them makes every
+    gzip-aware client (browsers, requests, curl --compressed) fail to decode
+    with "incorrect header check" even though the HTTP status is 200. The same
+    applies to Content-Length, which would then describe the compressed body,
+    not the bytes actually written. The proxy must drop these before
+    writeHead().
+    """
+    src = _read(PROXY_JS)
+    # The fix is a deny-list of transport headers, applied to the headers the
+    # proxy writes back to the client.
+    assert 'content-encoding' in src, (
+        'the proxy must handle content-encoding, otherwise a gzipped backend '
+        'response is forwarded with a stale compression header')
+    # content-length is already stripped from REQUEST headers (forwardHeaders),
+    # but it must also be stripped from the RESPONSE headers, otherwise the
+    # decompressed body is described by the compressed length.
+    code_lines = [ln for ln in src.splitlines()
+                  if not ln.lstrip().startswith('//')]
+    code = '\n'.join(code_lines)
+    assert 'content-encoding' in code and 'content-length' in code, (
+        'the proxy must reference both content-encoding and content-length in '
+        'its response-header handling (not only in request-header handling)')
+    # The response writeHead must not be a raw Object.fromEntries of the
+    # upstream headers -- that is exactly what shipped the bug.
+    assert 'Object.fromEntries(upstream.headers.entries())' not in code, (
+        'the proxy must not copy upstream headers verbatim into the response: '
+        'that forwards a stale Content-Encoding: gzip over an already-'
+        'decompressed body')
+
+
+def test_proxy_response_header_denylist_is_applied_before_writehead():
+    """The deny-list must be defined and consulted before res.writeHead.
+
+    Source-level ordering check: the hop-by-hop set must appear before the
+    writeHead call that sends the response, so the filtered headers are the
+    ones the client actually receives.
+    """
+    src = _read(PROXY_JS)
+    code_lines = [ln for ln in src.splitlines()
+                  if not ln.lstrip().startswith('//')]
+    code = '\n'.join(code_lines)
+    assert 'res.writeHead(upstream.status' in code, (
+        'the proxy must write the upstream status back to the client')
+    assert code.index('res.writeHead(upstream.status') > code.index(
+        'content-encoding'), (
+        'the transport-header deny-list must be built before writeHead, so '
+        'the filtered headers - not the raw upstream headers - are sent')
