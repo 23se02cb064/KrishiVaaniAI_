@@ -2,6 +2,7 @@ import os
 import io
 import json
 import logging
+import math
 import hashlib
 import csv
 import urllib.parse
@@ -1010,16 +1011,28 @@ GRADCAM_TIMEOUT_SECONDS = float(os.getenv('GRADCAM_TIMEOUT_SECONDS', '10'))
 # can be compared in production logs and in the frontend.
 CALIBRATION_FILE = os.getenv('CALIBRATION_FILE')
 CALIBRATION_TEMPERATURE = None
+CALIBRATION_SOURCE = None
 if CALIBRATION_FILE:
     try:
         with open(CALIBRATION_FILE, 'r') as fh:
-            CALIBRATION_TEMPERATURE = float(json.load(fh)['temperature'])
+            raw_temp = json.load(fh)['temperature']
+        T = float(raw_temp)
+        # A temperature must be strictly positive and finite. A negative T
+        # would invert the softmax ordering; NaN or inf would produce NaN
+        # probabilities that a frontend cannot display. Reject anything that
+        # is not a usable scalar rather than silently shipping broken values.
+        if not math.isfinite(T) or T <= 0:
+            raise ValueError(
+                f'temperature must be a finite positive number, got {raw_temp!r}')
+        CALIBRATION_TEMPERATURE = T
+        CALIBRATION_SOURCE = CALIBRATION_FILE
         logger.info('Loaded calibration temperature T=%s from %s',
                     CALIBRATION_TEMPERATURE, CALIBRATION_FILE)
     except Exception as exc:
         logger.error('Could not load CALIBRATION_FILE %s (%s); '
                      'calibration stays disabled', CALIBRATION_FILE, exc)
         CALIBRATION_TEMPERATURE = None
+        CALIBRATION_SOURCE = None
 else:
     logger.info('Confidence calibration disabled (set CALIBRATION_FILE to enable)')
 
@@ -1681,6 +1694,21 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
     confidence = prediction['confidence']
     is_uncertain = confidence < CONFIDENCE_THRESHOLD
 
+    # When calibration is active, the user-facing uncertainty decision is driven
+    # by the calibrated confidence. The raw value is still returned as
+    # `confidence` and `is_uncertain` for backward compatibility and debugging,
+    # but the message the user reads must agree with the number the frontend
+    # displays, and the frontend will display the calibrated value when present.
+    calibrated_confidence = prediction.get('confidence_calibrated')
+    is_uncertain_calibrated = (
+        calibrated_confidence < CONFIDENCE_THRESHOLD
+        if calibrated_confidence is not None else None
+    )
+    display_confidence = calibrated_confidence if is_uncertain_calibrated is not None else confidence
+    display_is_uncertain = (
+        is_uncertain_calibrated if is_uncertain_calibrated is not None else is_uncertain
+    )
+
     remedy = REMEDY_MAP.get(predicted_class)
     advisory_source = 'static'
     if remedy is None:
@@ -1709,12 +1737,18 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
         else:
             remedy = translate_text(remedy, lang)
 
-    if is_uncertain:
+    if display_is_uncertain:
+        calibration_note = ''
+        if is_uncertain_calibrated is not None:
+            calibration_note = (
+                f' (calibrated confidence: {calibrated_confidence*100:.1f}%; '
+                f'raw model confidence: {confidence*100:.1f}%)')
         uncertain_remedy = (
             f"The AI model is not confident about this prediction "
-            f"(confidence: {confidence*100:.1f}%).\n\n"
+            f"(confidence: {display_confidence*100:.1f}%{calibration_note}).\n\n"
             f"Suggested condition: {predicted_class}.\n\n"
-            f"For a more accurate diagnosis, try:\n"
+            f"This is an AI estimate, not a confirmed diagnosis. "
+            f"For a more accurate result, try:\n"
             f"- Capturing a clearer image with even lighting\n"
             f"- Including both the leaf and any visible lesions in frame\n"
             f"- Consulting a local agricultural expert\n\n"
@@ -1729,7 +1763,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
     performance_metrics['total_inference_ms'] += timings.get('inference_ms', 0)
     performance_metrics['total_preprocessing_ms'] += timings.get('preprocessing_ms', 0)
     performance_metrics['total_gradcam_ms'] += timings.get('gradcam_ms', 0)
-    if is_uncertain:
+    if display_is_uncertain:
         performance_metrics['predictions_below_threshold'] += 1
 
     result = {
@@ -1737,7 +1771,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
         'confidence': confidence,
         'is_uncertain': is_uncertain,
         'confidence_threshold': CONFIDENCE_THRESHOLD,
-        'remedy': uncertain_remedy if is_uncertain else remedy,
+        'remedy': uncertain_remedy if display_is_uncertain else remedy,
         'remedy_source': advisory_source,
         'lang': lang,
         'top_k_classes': prediction.get('top_k_classes', []),
@@ -1746,13 +1780,15 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
     if gate_summary is not None:
         result['leaf_gate'] = gate_summary
     if CALIBRATION_TEMPERATURE:
-        calibrated_confidence = prediction.get('confidence_calibrated')
         result['confidence_calibrated'] = calibrated_confidence
-        result['is_uncertain_calibrated'] = (
-            calibrated_confidence < CONFIDENCE_THRESHOLD
-            if calibrated_confidence is not None else None
-        )
+        result['is_uncertain_calibrated'] = is_uncertain_calibrated
         result['calibration_temperature'] = CALIBRATION_TEMPERATURE
+        result['calibration_source'] = CALIBRATION_SOURCE
+        # The frontend displays this as the primary confidence and uses this
+        # flag for the uncertainty banner. `confidence` and `is_uncertain`
+        # above remain the raw values for backward compatibility.
+        result['display_confidence'] = display_confidence
+        result['display_is_uncertain'] = display_is_uncertain
     if include_gradcam:
         attach_gradcam(prediction, image_bytes, deadline=deadline)
         _mark('gradcam_ms')

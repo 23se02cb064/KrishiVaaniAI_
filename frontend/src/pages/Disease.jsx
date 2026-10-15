@@ -172,11 +172,32 @@ export default function Disease() {
     return { crop, disease };
   };
 
-  const confidencePercent = result ? (result.confidence * 100).toFixed(1) : 0;
+  // The backend returns a raw confidence (`confidence`, `is_uncertain`) and,
+  // when a calibration file is loaded, a calibrated pair
+  // (`confidence_calibrated`, `is_uncertain_calibrated`). The frontend must
+  // only show the calibrated value when the backend explicitly confirms that
+  // calibration was applied; otherwise it shows the raw value and says so.
+  // Calibration is a post-hoc temperature scaling of the softmax: it cannot
+  // change the predicted class, so the disease name is identical either way.
+  const hasCalibration = !!result && result.calibration_temperature != null;
+  const displayConfidence = hasCalibration
+    ? (result.confidence_calibrated ?? result.confidence)
+    : result.confidence;
+  const displayIsUncertain = hasCalibration
+    ? (result.is_uncertain_calibrated ?? result.is_uncertain)
+    : result.is_uncertain;
+  const confidencePercent = result ? (displayConfidence * 100).toFixed(1) : 0;
+  const rawConfidencePercent = result ? (result.confidence * 100).toFixed(1) : 0;
   const { crop, disease } = parseClass(result?.class);
-  const isHealthy = !!result && !result.is_uncertain && disease.toLowerCase() === 'healthy';
+  const isHealthy = !!result && !displayIsUncertain && disease.toLowerCase() === 'healthy';
   const isLeafUncertain = gateRefusal?.errorType === 'LEAF_UNCERTAIN';
   const isQualityRefusal = !!gateRefusal && /^IMAGE_/.test(gateRefusal.errorType || '');
+  // A provisional result is one where the model itself flagged low confidence.
+  // This is NOT a validated clinical threshold: it is the backend's
+  // confidence_threshold (0.5), applied to whichever confidence figure the
+  // backend selected (raw or calibrated). Treat it as a guardrail, not a
+  // scientifically proven cutoff.
+  const isTentative = !!result && displayIsUncertain;
 
   return (
     <div className="space-y-6">
@@ -306,17 +327,32 @@ export default function Disease() {
                         re-check if symptoms appear, because a healthy-looking leaf does
                         not rule out early infection.
                       </p>
+                      {hasCalibration && (
+                        <p className="text-xs text-emerald-600 mt-1">
+                          Calibrated confidence {confidencePercent}% (raw model confidence {rawConfidencePercent}%).
+                          This is an AI estimate, not a confirmed diagnosis.
+                        </p>
+                      )}
                     </div>
                   )}
-                  {result.is_uncertain && (
+                  {isTentative && (
                     <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
                       <div className="flex items-start gap-3">
                         <span className="text-2xl flex-shrink-0">⚠</span>
                         <div>
-                          <p className="font-semibold text-amber-800 text-sm mb-1">Uncertain Prediction</p>
+                          <p className="font-semibold text-amber-800 text-sm mb-1">Tentative AI Prediction</p>
                           <p className="text-xs text-amber-700">
-                            The AI model&apos;s confidence ({confidencePercent}%) is below the threshold
-                            for this prediction. Consider capturing a clearer image or consulting a local expert.
+                            The AI model is not confident about this prediction
+                            (confidence {confidencePercent}%).
+                            {hasCalibration
+                              ? ` Calibrated confidence {confidencePercent}% (raw model confidence ${rawConfidencePercent}%).`
+                              : ''}
+                          </p>
+                          <p className="text-xs text-amber-700 mt-1">
+                            This is an AI estimate, not a confirmed diagnosis. The
+                            confidence threshold is a provisional guardrail, not a
+                            scientifically validated cutoff. Consider capturing a
+                            clearer image or consulting a local expert.
                           </p>
                         </div>
                       </div>
@@ -334,17 +370,23 @@ export default function Disease() {
                     <div className="sm:col-span-2 p-4 bg-slate-50 rounded-xl border border-slate-200">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-xs text-slate-500 uppercase tracking-wide">Confidence</p>
-                        <span className={`text-lg font-semibold ${result.is_uncertain ? 'text-amber-600' : 'text-emerald-600'}`}>{confidencePercent}%</span>
+                        <span className={`text-lg font-semibold ${displayIsUncertain ? 'text-amber-600' : 'text-emerald-600'}`}>{confidencePercent}%</span>
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
                         <div
-                          className={`h-3 rounded-full transition-all duration-700 ease-out ${result.is_uncertain ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                          className={`h-3 rounded-full transition-all duration-700 ease-out ${displayIsUncertain ? 'bg-amber-500' : 'bg-emerald-500'}`}
                           style={{ width: `${confidencePercent}%` }}
                         />
                       </div>
                       {result.confidence_threshold && (
                         <p className="text-xs text-slate-400 mt-1">
                           Threshold: {(result.confidence_threshold * 100).toFixed(0)}%
+                        </p>
+                      )}
+                      {hasCalibration && (
+                        <p className="text-xs text-slate-400 mt-1">
+                          Calibrated from raw {rawConfidencePercent}%. This is an AI
+                          estimate, not a confirmed diagnosis.
                         </p>
                       )}
                     </div>
@@ -485,6 +527,9 @@ export default function Disease() {
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Detected Condition</p>
                     <p className="text-sm font-medium text-slate-900">{disease}</p>
+                    {isTentative && (
+                      <p className="text-xs text-amber-600 mt-1 font-medium">Tentative AI estimate</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Affected Crop</p>
@@ -492,9 +537,19 @@ export default function Disease() {
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">AI Confidence</p>
-                    <p className="text-sm font-medium text-emerald-600">{confidencePercent}%</p>
+                    <p className={`text-sm font-medium ${displayIsUncertain ? 'text-amber-600' : 'text-emerald-600'}`}>{confidencePercent}%</p>
+                    {hasCalibration && (
+                      <p className="text-xs text-slate-400 mt-1">
+                        Raw model confidence: {rawConfidencePercent}%
+                      </p>
+                    )}
                   </div>
                 </div>
+                <p className="text-xs text-slate-400 mt-3 italic">
+                  This is an AI estimate, not a confirmed diagnosis. The confidence
+                  threshold is a provisional guardrail, not a scientifically validated
+                  cutoff. Confirm with a local agricultural expert before acting.
+                </p>
               </div>
 
               <div className="card p-6">

@@ -358,3 +358,83 @@ def test_proxy_timeout_does_not_exceed_platform_ceiling_in_vercel_json():
             '%s: vercel.json sets maxDuration=%ss, which would terminate the '
             'proxy before its 120s upstream timeout can elapse'
             % (key, md))
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic logging: the proxy must distinguish its two 502 paths.
+# ---------------------------------------------------------------------------
+
+def test_proxy_failure_log_records_error_code():
+    """The upstream-failure log must include the Node system error code.
+
+    err.code is the field that distinguishes ECONNRESET from ENOTFOUND from
+    ETIMEDOUT. Without it a connection error and a mid-stream reset look
+    identical in the logs, which is exactly the ambiguity that blocked the
+    previous root-cause investigation.
+    """
+    src = _read(PROXY_JS)
+    assert 'error_code' in src, (
+        'the proxy must log error_code from err.code so connection failures '
+        'are distinguishable by their Node system code')
+
+
+def test_proxy_failure_log_records_error_name():
+    """The upstream-failure log must include the exception name."""
+    src = _read(PROXY_JS)
+    assert 'error_name' in src, (
+        'the proxy must log the exception name alongside the error code')
+
+
+def test_proxy_response_log_flags_5xx_upstream():
+    """The upstream-response log must flag a 5xx status explicitly.
+
+    A Render-side 502 (gunicorn HTML page or Flask JSON handler) and a
+    successful 200 both go through proxy.js:190, so the log must record
+    whether the upstream status was in the 5xx range. Without this flag a
+    Render-generated 502 is indistinguishable from a healthy response in
+    the logs.
+    """
+    src = _read(PROXY_JS)
+    assert 'is_5xx' in src, (
+        'the proxy must log is_5xx so a Render-side 5xx is distinguishable '
+        'from a healthy upstream response')
+    assert 'upstreamStatus >= 500' in src, (
+        'the proxy must compute is_5xx from the upstream status')
+
+
+def test_proxy_response_log_records_content_type():
+    """The upstream-response log must record the content type.
+
+    A gunicorn HTML 502 page and a Flask JSON 502 handler both carry HTTP
+    502 but differ in content-type. Logging it lets the failure path be
+    identified from the logs alone, without reading the response body.
+    """
+    src = _read(PROXY_JS)
+    assert 'content_type' in src, (
+        'the proxy must log the upstream content type so a gunicorn HTML 502 '
+        'is distinguishable from a Flask JSON 502')
+
+
+def test_proxy_502_body_is_constant_for_fetch_failures():
+    """When fetch() throws, the proxy body must be the known constant.
+
+    This is the diagnostic that separates the two 502 paths: a body of
+    {"error":"Backend proxy error"} means fetch() threw (proxy.js:155), while
+    any other body means Render returned 502 and the proxy forwarded it
+    (proxy.js:190).
+    """
+    src = _read(PROXY_JS)
+    assert "'Backend proxy error'" in src, (
+        'the proxy must return a constant JSON body when fetch() throws, so '
+        'the two 502 paths are distinguishable by body content')
+    assert "res.writeHead(502" in src, (
+        'the proxy must write 502 when fetch() throws')
+
+
+def test_proxy_timeout_and_gzip_fix_preserved():
+    """The diagnostic changes must not alter the timeout or gzip handling."""
+    src = _read(PROXY_JS)
+    assert 'AbortSignal.timeout(120000)' in src, (
+        'the 120-second timeout must remain unchanged')
+    assert "HOP_BY_HOP" in src and "'content-encoding'" in src, (
+        'the gzip HOP_BY_HOP filtering must remain unchanged')
