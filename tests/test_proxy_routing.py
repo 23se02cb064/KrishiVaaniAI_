@@ -259,3 +259,102 @@ def test_proxy_response_header_denylist_is_applied_before_writehead():
         'content-encoding'), (
         'the transport-header deny-list must be built before writeHead, so '
         'the filtered headers - not the raw upstream headers - are sent')
+
+
+# ---------------------------------------------------------------------------
+# Upstream timeout (cold-start 502 fix)
+# ---------------------------------------------------------------------------
+
+# Verified platform ceilings (2026-10-15, from vercel.com/docs/functions/limits
+# and vercel.com/docs/functions/configuring-functions/duration):
+#   Vercel Hobby function max duration: 300s (configurable, no Pro required)
+#   Vercel proxied-request timeout: 120s (external rewrites/routes only)
+#   Render gunicorn --timeout: 120s (render.yaml:13)
+# The proxy is a Node FUNCTION (vercel.json routes /api/(.*) -> /api/proxy.js),
+# so the 300s ceiling applies, not the 120s rewrite limit.
+VERCEL_HOBBY_FUNCTION_MAX_SECONDS = 300
+RENDER_GUNICORN_TIMEOUT_SECONDS = 120
+
+
+def test_proxy_upstream_timeout_is_120_seconds():
+    """The proxy's upstream fetch must wait 120s, matching the backend's own
+    gunicorn --timeout (render.yaml:13).
+
+    The previous 30s value was a self-imposed cap, not a platform one. On a
+    cold Render instance the container restarts, pip reinstalls torch
+    (~200MB CPU wheel), gunicorn starts, and the model loads -- measured at
+    ~70s end-to-end. The 30s cap fired before the backend could ever answer,
+    so every cold-start request deterministically returned 502 even though
+    the backend was healthy and would have served the request a few seconds
+    later once warm. Raising the cap to the backend's own timeout lets a cold
+    start complete instead of failing.
+    """
+    src = _read(PROXY_JS)
+    code_lines = [ln for ln in src.splitlines()
+                  if not ln.lstrip().startswith('//')]
+    code = '\n'.join(code_lines)
+    assert 'AbortSignal.timeout(120000)' in code, (
+        'the proxy must wait 120000ms (120s) for the upstream response')
+    assert 'AbortSignal.timeout(30000)' not in code, (
+        'the old 30s cap must be replaced, not duplicated')
+
+
+def test_proxy_timeout_stays_within_vercel_function_limit():
+    """The configured timeout must not exceed the Vercel function-duration
+    ceiling, otherwise Vercel terminates the invocation (504
+    FUNCTION_INVOCATION_TIMEOUT) before the upstream can answer.
+    """
+    src = _read(PROXY_JS)
+    match = re.search(r'AbortSignal\.timeout\((\d+)\)', src)
+    assert match is not None, 'the proxy must use AbortSignal.timeout(ms)'
+    timeout_ms = int(match.group(1))
+    assert timeout_ms <= VERCEL_HOBBY_FUNCTION_MAX_SECONDS * 1000, (
+        'the proxy timeout %dms exceeds the Vercel Hobby function-duration '
+        'ceiling of %ds; Vercel would kill the invocation before the '
+        'upstream can respond' % (timeout_ms, VERCEL_HOBBY_FUNCTION_MAX_SECONDS))
+
+
+def test_proxy_timeout_matches_backend_gunicorn_timeout():
+    """The proxy must not wait longer than the worker it proxies to.
+
+    render.yaml:13 runs gunicorn with --timeout 120, so the backend kills
+    any request that occupies its single synchronous worker past 120s and
+    returns an HTML 502. The proxy waiting past that point can never succeed:
+    it would only add latency to a request that is already doomed.
+    """
+    src = _read(PROXY_JS)
+    match = re.search(r'AbortSignal\.timeout\((\d+)\)', src)
+    assert match is not None
+    timeout_ms = int(match.group(1))
+    assert timeout_ms <= RENDER_GUNICORN_TIMEOUT_SECONDS * 1000, (
+        'the proxy timeout %dms exceeds the backend gunicorn --timeout of '
+        '%ds, so it would wait for a response the worker has already '
+        'abandoned' % (timeout_ms, RENDER_GUNICORN_TIMEOUT_SECONDS))
+
+
+def test_proxy_timeout_comment_explains_cold_start_rationale():
+    """The timeout must carry its rationale in a comment, so the value is
+    not silently changed back to 30s by a future edit."""
+    src = _read(PROXY_JS)
+    assert 'cold' in src.lower(), (
+        'the proxy timeout must document the cold-start rationale it exists '
+        'to absorb')
+    assert 'render.yaml' in src.lower() or 'gunicorn' in src.lower(), (
+        'the proxy timeout must reference the backend gunicorn timeout it '
+        'is aligned with')
+
+
+def test_proxy_timeout_does_not_exceed_platform_ceiling_in_vercel_json():
+    """vercel.json must not set a per-function maxDuration that would cut the
+    proxy off before its own 120s upstream timeout can elapse. A missing
+    functions block is fine: Vercel then uses the Hobby default of 300s."""
+    cfg = json.load(open(FRONTEND_VERCEL_JSON))
+    functions = cfg.get('functions', {})
+    for key, entry in functions.items():
+        md = entry.get('maxDuration') if isinstance(entry, dict) else None
+        if md is None:
+            continue
+        assert md >= RENDER_GUNICORN_TIMEOUT_SECONDS, (
+            '%s: vercel.json sets maxDuration=%ss, which would terminate the '
+            'proxy before its 120s upstream timeout can elapse'
+            % (key, md))

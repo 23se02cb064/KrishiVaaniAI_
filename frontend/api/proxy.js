@@ -115,8 +115,23 @@ export default async (req, res) => {
       method: req.method,
       headers: forwardHeaders(req),
       body: body && body.length ? body : undefined,
-      // The backend can be slow on the free tier; give it room but not forever.
-      signal: AbortSignal.timeout(30000),
+      // The backend is on a shared free tier and can be slow on a cold start.
+      //
+      // 120s matches the backend's own gunicorn --timeout (render.yaml:13), so
+      // the proxy can never wait longer than the worker it is proxying to.
+      // It is also well inside Vercel's Hobby function-duration ceiling of
+      // 300s (vercel.com/docs/functions/limitations), so it does not approach
+      // the platform's own hard limit.
+      //
+      // The previous 30s value was a self-imposed cap, not a platform one. On
+      // a cold Render instance the container restarts, pip reinstalls torch
+      // (~200MB CPU wheel), gunicorn starts, and the model loads -- measured
+      // at ~70s end-to-end. The 30s cap fired before the backend could ever
+      // answer, so every cold-start request deterministically returned 502
+      // even though the backend was healthy and would have served the request
+      // a few seconds later once warm. Raising the cap to the backend's own
+      // timeout lets a cold start complete instead of failing.
+      signal: AbortSignal.timeout(120000),
     });
   } catch (err) {
     // Safe diagnostics: record the upstream URL PATH (never query params, which
