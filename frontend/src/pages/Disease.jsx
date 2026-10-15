@@ -11,6 +11,12 @@ export default function Disease() {
   const [dragOver, setDragOver] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [gradcamView, setGradcamView] = useState('blend');
+  // Grad-CAM is an optional second forward pass (~1.7s on the production tier).
+  // It is off by default so a routine analysis stays cheap; the user can opt in
+  // per request. The backend returns gradcam_overlay / gradcam_heatmap only when
+  // include_gradcam=true is sent, so leaving this false is what made the
+  // "Visual Analysis" panel show "Heatmap not available" for every request.
+  const [includeGradcam, setIncludeGradcam] = useState(false);
   // Set when the backend refused the image, so the message can distinguish "this is not
   // a leaf" from "this leaf could not be diagnosed confidently" and from a transport
   // failure. The backend returns no class, confidence, Grad-CAM or remedy in all three.
@@ -76,7 +82,9 @@ export default function Disease() {
       const formData = new FormData();
       formData.append('image', file);
       formData.append('lang', 'en');
-      formData.append('include_gradcam', 'false');
+      // Only request the attention visualisation when the user opted in. The
+      // backend runs a second forward pass for it, so it is not sent by default.
+      formData.append('include_gradcam', includeGradcam ? 'true' : 'false');
       formData.append('source', source);
 
       const res = await fetch(
@@ -217,17 +225,26 @@ export default function Disease() {
               </button>
             </div>
 
-            {preview && !result && selectedFile && (
-              <div className="mt-4 flex gap-3">
-                <button
-                  onClick={() => analyze(selectedFile)}
-                  disabled={loading}
-                  className="btn btn-primary flex-1"
-                >
-                  {loading ? 'Analyzing...' : 'Analyze'}
-                </button>
-              </div>
-            )}
+{preview && !result && selectedFile && (
+          <div className="mt-4 flex flex-col gap-3">
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeGradcam}
+                onChange={(e) => setIncludeGradcam(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              Show affected-region heatmap (adds ~2s)
+            </label>
+            <button
+              onClick={() => analyze(selectedFile)}
+              disabled={loading}
+              className="btn btn-primary flex-1"
+            >
+              {loading ? 'Analyzing...' : 'Analyze'}
+            </button>
+          </div>
+        )}
 
             {(result || preview) && (
               <div className="mt-4 flex gap-3">

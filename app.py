@@ -1485,6 +1485,13 @@ def _gate_rejection_response(decision, lang, source):
     No class, no confidence, no top-3, no Grad-CAM and no remedy. The frontend needs a
     machine-readable reason so it can show the right guidance, and the reason code is
     part of the API contract, so it is returned alongside the human message.
+
+    The accept/reject thresholds reported alongside the verdict MUST be the ones the
+    deciding validator actually used. A classifier decision carries the classifier's
+    thresholds (0.62 / 0.10); a heuristic-gate decision carries the gate's (0.90 / 0.05).
+    Reporting the gate's thresholds for a classifier verdict is misleading: the frontend
+    uses those fields to explain *why* the image was refused, and showing 0.90 for a
+    0.62 classifier makes an uncertain leaf look far further from acceptance than it is.
     """
     error_type = decision.get('error_type')
     if error_type is None:
@@ -1495,6 +1502,18 @@ def _gate_rejection_response(decision, lang, source):
         else leaf_gate_module.MESSAGES
     reason = messages.get(error_type) or decision.get('reason') or \
         messages[leaf_gate_module.ERROR_NON_LEAF]
+
+    # The deciding validator's own thresholds, when known. Falls back to the
+    # heuristic gate only when the classifier was not the one that decided.
+    signals = decision.get('signals') or {}
+    validator = signals.get('validator')
+    if validator == 'leaf_classifier':
+        accept_threshold = signals.get('accept_threshold')
+        reject_threshold = signals.get('reject_threshold')
+    else:
+        accept_threshold = LEAF_GATE.accept_threshold if LEAF_GATE else None
+        reject_threshold = LEAF_GATE.reject_threshold if LEAF_GATE else None
+
     response = {
         'error': reason,
         'error_type': error_type,
@@ -1502,8 +1521,8 @@ def _gate_rejection_response(decision, lang, source):
             'state': decision.get('state'),
             'is_leaf': decision.get('is_leaf'),
             'leaf_confidence': decision.get('leaf_confidence'),
-            'accept_threshold': (LEAF_GATE.accept_threshold if LEAF_GATE else None),
-            'reject_threshold': (LEAF_GATE.reject_threshold if LEAF_GATE else None),
+            'accept_threshold': accept_threshold,
+            'reject_threshold': reject_threshold,
             'reason': decision.get('reason'),
             'score_basis': decision.get('score_basis'),
             'signals': decision.get('signals'),
