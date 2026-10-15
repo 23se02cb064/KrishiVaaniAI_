@@ -38,6 +38,26 @@ from gradcam import generate_gradcam_overlay, find_target_layer
 # Select CUDA when available; otherwise use CPU.
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Bound the CPU thread pool. PyTorch defaults to using every hardware thread on
+# the machine, which on a shared Render free-tier vCPU causes thread oversubscription:
+# the OS scheduler time-slices between far more threads than there are cores, the
+# MobileNetV2 forward pass pays a constant overhead per op, and a ~30ms inference
+# on a healthy machine stretches past the Vercel proxy's 30s wall clock. Capping
+# the pool to the physical core count (or fewer) removes that overhead without
+# changing any model weights, thresholds, or the prediction path.
+_TORCH_CPU_THREADS = int(os.getenv('TORCH_CPU_THREADS', '0'))
+if _TORCH_CPU_THREADS > 0:
+    torch.set_num_threads(_TORCH_CPU_THREADS)
+    torch.set_num_interop_threads(min(4, _TORCH_CPU_THREADS))
+elif not torch.cuda.is_available():
+    # Cap at the physical core count so hyper-threading siblings do not double
+    # the runnable queue. os.cpu_count() reports logical CPUs; halve it as a
+    # conservative default for a 1-2 vCPU free-tier instance.
+    _logical = os.cpu_count() or 1
+    _threads = max(1, _logical // 2)
+    torch.set_num_threads(_threads)
+    torch.set_num_interop_threads(min(4, _threads))
+
 
 # ---------------------------------------------------------------------------
 # Image Preprocessing Utilities
@@ -1497,6 +1517,12 @@ def _gate_rejection_response(decision, lang, source):
 
 def _analyze_single_image(image_file, lang='en', include_gradcam=False,
                           source='upload', deadline=None):
+    stage_timings = {}
+    _t0 = time.perf_counter()
+
+    def _mark(stage):
+        stage_timings[stage] = round((time.perf_counter() - _t0) * 1000, 2)
+
     # Validate file before reading
     is_valid, error_msg = validate_image_file(image_file)
     if not is_valid:
@@ -1508,6 +1534,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
         raise ValueError('File does not appear to be a valid image')
 
     image_bytes = image_file.read()
+    _mark('request_parse_ms')
 
     # Decode once with improved preprocessing (EXIF, RGBA, etc.)
     try:
@@ -1524,6 +1551,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
                       'error_type': leaf_gate_module.ERROR_UNREADABLE,
                       'reason': 'Failed to process image', 'score_basis': 'quality', 'signals': None}
         return _gate_rejection_response(unreadable, lang, source)
+    _mark('image_decode_ms')
 
     prediction = None
     authority = leaf_validation_authority()
@@ -1535,8 +1563,11 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
     # which is unguarded in every respect.
     if LEAF_GATE is not None and authority != 'bypass':
         prefiltered = LEAF_GATE.prefilter(image)
+        _mark('quality_gate_ms')
         if prefiltered is not None:
             performance_metrics['images_refused_by_gate'] += 1
+            logger.info('[ANALYZE] stage_timings=%s state=REJECTED',
+                        stage_timings)
             return _gate_rejection_response(prefiltered, lang, source)
 
     # Stage 2: leaf suitability, before the disease model is spent on the image.
@@ -1551,6 +1582,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
         gate_summary = None
     elif authority == 'classifier':
         verdict = LEAF_CLASSIFIER.classify(image)
+        _mark('leaf_classifier_ms')
         logger.info('[LEAF VALIDATION] authority=%s classifier_loaded=True score=%s '
                     'accept_threshold=%s reject_threshold=%s verdict=%s',
                     authority,
@@ -1563,6 +1595,8 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
                         verdict['state'])
             performance_metrics['images_refused_by_gate'] += 1
             decision = _classifier_verdict_to_decision(verdict)
+            logger.info('[ANALYZE] stage_timings=%s state=REJECTED',
+                        stage_timings)
             return _gate_rejection_response(decision, lang, source)
         logger.info('[LEAF VALIDATION] LEAF -> continuing to disease classifier')
         gate_summary = {
@@ -1578,12 +1612,14 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
         # Fallback path. Only taken when the classifier is unavailable; the heuristic
         # gate is safe but has poor real-world recall, which is why it is not primary.
         prediction = predict_image(image_bytes)
+        _mark('mobilenetv2_ms')
         decision = LEAF_GATE.assess(
             image,
             embedding=np.asarray(prediction['_embedding'], dtype=np.float32),
             probabilities=prediction['_probabilities'],
             crops=LEAF_CROPS,
         )
+        _mark('heuristic_gate_ms')
         logger.info('[LEAF VALIDATION] authority=%s score=%s accept_threshold=%s reject_threshold=%s verdict=%s',
                     authority,
                     decision.get('leaf_confidence'),
@@ -1620,6 +1656,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
 
     if prediction is None:
         prediction = predict_image(image_bytes)
+    _mark('mobilenetv2_ms')
 
     predicted_class = prediction['predicted_class']
     confidence = prediction['confidence']
@@ -1699,6 +1736,7 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
         result['calibration_temperature'] = CALIBRATION_TEMPERATURE
     if include_gradcam:
         attach_gradcam(prediction, image_bytes, deadline=deadline)
+        _mark('gradcam_ms')
         result['gradcam_overlay'] = prediction.get('gradcam_overlay')
         result['gradcam_heatmap'] = prediction.get('gradcam_heatmap')
         if 'gradcam_error' in prediction:
@@ -1709,6 +1747,10 @@ def _analyze_single_image(image_file, lang='en', include_gradcam=False,
     # send to a browser; they must not survive into the response.
     prediction.pop('_embedding', None)
     prediction.pop('_probabilities', None)
+
+    _mark('serialize_ms')
+    stage_timings['total_ms'] = round((time.perf_counter() - _t0) * 1000, 2)
+    logger.info('[ANALYZE] stage_timings=%s', stage_timings)
 
     return result
 
