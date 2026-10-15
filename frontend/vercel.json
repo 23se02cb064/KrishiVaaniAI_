@@ -4,6 +4,10 @@
   "buildCommand": "npm run build",
   "routes": [
     {
+      "src": "/health",
+      "dest": "/api/proxy.js"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/proxy.js"
     }
