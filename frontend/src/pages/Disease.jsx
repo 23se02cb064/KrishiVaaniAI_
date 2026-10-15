@@ -76,7 +76,7 @@ export default function Disease() {
       const formData = new FormData();
       formData.append('image', file);
       formData.append('lang', 'en');
-      formData.append('include_gradcam', 'true');
+      formData.append('include_gradcam', 'false');
       formData.append('source', source);
 
       const res = await fetch(
