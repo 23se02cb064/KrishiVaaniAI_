@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 from unittest.mock import patch, MagicMock
@@ -15,6 +16,7 @@ os.environ.setdefault('DATABASE_URL', 'sqlite:///test_regression.db')
 os.environ.setdefault('FLASK_TESTING', '1')
 
 import app as app_module
+from leaf_classifier import get_classifier, STATE_LEAF, STATE_NON_LEAF, STATE_UNCERTAIN
 
 NON_LEAF_IMAGE = os.path.join(
     ROOT, 'artifacts', 'leaf_classifier', 'dataset', 'nonleaf', 'animal',
@@ -137,3 +139,130 @@ def test_real_leaf_reaches_disease_model():
     assert resp.status_code == 200
     payload = resp.get_json()
     assert 'class' in payload
+
+
+def test_classifier_class_mapping_is_correct():
+    """Index 0 must mean nonleaf and index 1 must mean leaf.
+
+    The checkpoint stores labels ['nonleaf', 'leaf'] and probability()
+    reads probs[0, 1] as the leaf score. If this mapping were inverted,
+    non-leaf images would be accepted as leaves.
+    """
+    clf = get_classifier()
+    if clf is None:
+        pytest.skip('leaf classifier not loaded')
+    assert clf.labels == ['nonleaf', 'leaf'], f'unexpected labels: {clf.labels}'
+    assert clf.labels[0] == 'nonleaf'
+    assert clf.labels[1] == 'leaf'
+
+
+def test_classifier_fail_closed_on_inference_error(monkeypatch):
+    """If the classifier throws during inference, it must return UNCERTAIN,
+    never LEAF. A fail-open error would let non-leaf images reach the
+    disease model.
+    """
+    clf = get_classifier()
+    if clf is None:
+        pytest.skip('leaf classifier not loaded')
+
+    original_probability = clf.probability
+
+    def _failing_probability(image):
+        raise RuntimeError('simulated inference failure')
+
+    monkeypatch.setattr(clf, 'probability', _failing_probability)
+
+    try:
+        from PIL import Image
+        img = Image.new('RGB', (224, 224), color=(128, 128, 128))
+        verdict = clf.classify(img)
+    finally:
+        monkeypatch.setattr(clf, 'probability', original_probability)
+
+    assert verdict['state'] == STATE_UNCERTAIN, \
+        f'classifier must fail closed to UNCERTAIN, got {verdict["state"]}'
+    assert verdict['is_leaf'] is None
+
+
+def test_classifier_rejects_all_audit_nonleaf_images():
+    """Every non-leaf image in the held-out audit test set must be rejected.
+
+    This is the safety net: zero non-leaf false accepts. The production
+    incident involved a non-leaf image type not present in this audit set,
+    so this test guards against regression on the images we *have* measured.
+    """
+    clf = get_classifier()
+    if clf is None:
+        pytest.skip('leaf classifier not loaded')
+
+    manifest_path = os.path.join(ROOT, 'audit', 'test_set_manifest.json')
+    if not os.path.exists(manifest_path):
+        pytest.skip('audit test set manifest not present')
+
+    with open(manifest_path) as fh:
+        entries = json.load(fh)
+
+    audit_dir = os.path.join(ROOT, 'audit', 'test_set')
+    nonleaf = [e for e in entries if not e.get('expected_leaf')]
+    if not nonleaf:
+        pytest.skip('no non-leaf audit images')
+
+    accepted = 0
+    refused = 0
+    for entry in nonleaf:
+        path = os.path.join(audit_dir, entry['file'])
+        if not os.path.exists(path):
+            continue
+        with Image.open(path) as img:
+            verdict = clf.classify(img.convert('RGB'))
+        if verdict['state'] == STATE_LEAF:
+            accepted += 1
+        else:
+            refused += 1
+
+    assert accepted == 0, (
+        f'{accepted} of {refused + accepted} audit non-leaf images were wrongly '
+        f'accepted as leaves by the classifier')
+    assert refused == len([e for e in nonleaf if os.path.exists(os.path.join(audit_dir, e['file']))])
+
+
+def test_classifier_accepts_most_audit_leaf_images():
+    """Most genuine leaf images in the audit set must be accepted.
+
+    Two red/yellow leaves are known to score below threshold (they lack green),
+    so not all 18 will pass. This test guards against regression where
+    previously-accepted leaves start being rejected.
+    """
+    clf = get_classifier()
+    if clf is None:
+        pytest.skip('leaf classifier not loaded')
+
+    manifest_path = os.path.join(ROOT, 'audit', 'test_set_manifest.json')
+    if not os.path.exists(manifest_path):
+        pytest.skip('audit test set manifest not present')
+
+    with open(manifest_path) as fh:
+        entries = json.load(fh)
+
+    audit_dir = os.path.join(ROOT, 'audit', 'test_set')
+    leaf_entries = [e for e in entries if e.get('expected_leaf')]
+    if not leaf_entries:
+        pytest.skip('no leaf audit images')
+
+    accepted = 0
+    refused = 0
+    for entry in leaf_entries:
+        path = os.path.join(audit_dir, entry['file'])
+        if not os.path.exists(path):
+            continue
+        with Image.open(path) as img:
+            verdict = clf.classify(img.convert('RGB'))
+        if verdict['state'] == STATE_LEAF:
+            accepted += 1
+        else:
+            refused += 1
+
+    total = accepted + refused
+    assert total > 0, 'no audit leaf images were readable'
+    assert accepted >= total * 0.75, (
+        f'only {accepted}/{total} audit leaf images accepted (< 75%)')
