@@ -182,10 +182,10 @@ export default function Disease() {
   const hasCalibration = !!result && result.calibration_temperature != null;
   const displayConfidence = hasCalibration
     ? (result.confidence_calibrated ?? result.confidence)
-    : result.confidence;
+    : (result ? result.confidence : 0);
   const displayIsUncertain = hasCalibration
     ? (result.is_uncertain_calibrated ?? result.is_uncertain)
-    : result.is_uncertain;
+    : (result ? result.is_uncertain : false);
   const confidencePercent = result ? (displayConfidence * 100).toFixed(1) : 0;
   const rawConfidencePercent = result ? (result.confidence * 100).toFixed(1) : 0;
   const { crop, disease } = parseClass(result?.class);
