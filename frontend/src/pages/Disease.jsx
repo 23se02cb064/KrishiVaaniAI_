@@ -216,7 +216,7 @@ export default function Disease() {
               onDrop={onDrop}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
-              className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-colors cursor-pointer ${
+              className={`relative border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-colors cursor-pointer ${
                 dragOver
                   ? 'border-emerald-400 bg-emerald-50'
                   : 'border-slate-300 hover:border-emerald-400 hover:bg-slate-50'
@@ -237,12 +237,12 @@ export default function Disease() {
               <p className="text-xs text-slate-500 mt-1">Supports JPG, PNG, WebP up to 16MB</p>
             </div>
 
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-col sm:flex-row gap-3">
               <button
                 onClick={() => setShowCamera(true)}
-                className="btn btn-outline flex-1"
+                className="btn btn-outline w-full sm:flex-1"
               >
-                <span className="mr-2">📹</span> Capture with Camera
+                <span className="mr-2 sm:mr-0">📹</span> Capture with Camera
               </button>
             </div>
 
@@ -260,7 +260,7 @@ export default function Disease() {
             <button
               onClick={() => analyze(selectedFile)}
               disabled={loading}
-              className="btn btn-primary flex-1"
+              className="btn btn-primary w-full sm:flex-1"
             >
               {loading ? 'Analyzing...' : 'Analyze'}
             </button>
@@ -268,8 +268,8 @@ export default function Disease() {
         )}
 
             {(result || preview) && (
-              <div className="mt-4 flex gap-3">
-                <button onClick={reset} className="btn btn-secondary">
+              <div className="mt-4 flex flex-col sm:flex-row gap-3">
+                <button onClick={reset} className="btn btn-secondary w-full sm:flex-1">
                   Analyze Another
                 </button>
               </div>
@@ -313,8 +313,8 @@ export default function Disease() {
 
         {result && (
           <>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="md:col-span-2 lg:col-span-2 space-y-6">
                 <div className="card p-6">
                   <h4 className="text-base font-semibold text-slate-900 mb-4">Diagnosis Result</h4>
                   {isHealthy && (
@@ -416,7 +416,7 @@ export default function Disease() {
 
               <div className="card p-6">
                 <h4 className="text-base font-semibold text-slate-900 mb-4">Visual Analysis (Grad-CAM)</h4>
-                <div className="flex gap-2 mb-4 p-1 bg-slate-100 rounded-lg text-xs">
+                <div className="flex flex-wrap gap-2 mb-4 p-1 bg-slate-100 rounded-lg text-xs">
                   <button
                     onClick={() => setGradcamView('side-by-side')}
                     className={`px-3 py-1.5 rounded-md font-medium transition-all ${

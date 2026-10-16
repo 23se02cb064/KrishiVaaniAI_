@@ -10,14 +10,20 @@ async function request(path, options = {}) {
   };
 
   const response = await fetch(url, config);
-  const data = await response.json();
   if (!response.ok) {
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      // Non-JSON body (e.g. gateway HTML page). Treat as server-side failure.
+      data = { error: `Server returned HTTP ${response.status}` };
+    }
     const error = new Error(data.error || data.message || 'Request failed');
     error.status = response.status;
     error.data = data;
     throw error;
   }
-  return data;
+  return response.json();
 }
 
 export const api = {
@@ -47,7 +53,12 @@ export const api = {
   weather: (lat, lon) => {
     let url = `${API_BASE}/weather`;
     if (lat && lon) url += `?lat=${lat}&lon=${lon}`;
-    return fetch(url).then((r) => r.json());
+    return fetch(url).then(async (r) => {
+      if (!r.ok) {
+        throw new Error(`Weather service returned HTTP ${r.status}`);
+      }
+      return r.json();
+    });
   },
 
   tts: (text, lang = 'en') =>

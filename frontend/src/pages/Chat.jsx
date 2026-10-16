@@ -28,12 +28,12 @@ export default function Chat() {
       <div className="card p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-1">AI Agricultural Assistant</h3>
         <p className="text-sm text-slate-500 mb-4">Ask questions about crops, diseases, weather, or market prices.</p>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
           <textarea
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Type your question here..."
-            className="flex-1 p-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none"
+            className="flex-1 p-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none min-h-[100px]"
             rows={3}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -42,7 +42,7 @@ export default function Chat() {
               }
             }}
           />
-          <button onClick={send} disabled={loading || !query.trim()} className="btn btn-primary self-end">
+          <button onClick={send} disabled={loading || !query.trim()} className="btn btn-primary w-full sm:w-auto self-end sm:self-start">
             {loading ? 'Sending...' : 'Send'}
           </button>
         </div>

@@ -22,7 +22,7 @@ const TRAINING_CONFIG = {
   randomSeed: 42,
 };
 
-function LineChart({ data, color, label, height = 240 }) {
+function LineChart({ data, color, label, height = 240, width = 500 }) {
   if (!data || data.length < 2) {
     return (
       <div className="card p-5" style={{ height }}>
@@ -38,7 +38,6 @@ function LineChart({ data, color, label, height = 240 }) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
-  const width = 800;
   const padding = { top: 20, right: 30, bottom: 40, left: 50 };
   const chartW = width - padding.left - padding.right;
   const chartH = height - padding.top - padding.bottom;
@@ -58,7 +57,7 @@ function LineChart({ data, color, label, height = 240 }) {
   return (
     <div className="card p-5">
       <p className="text-sm font-medium text-slate-700 mb-4">{label}</p>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }} preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}>
         <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#e2e8f0" strokeWidth="1" />
         <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#e2e8f0" strokeWidth="1" />
 
@@ -177,8 +176,8 @@ export default function Training() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="md:col-span-2 lg:col-span-2 space-y-6">
           <div className="card p-6">
             <div className="flex items-start justify-between mb-6">
               <div>
@@ -222,16 +221,20 @@ export default function Training() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             <MetricCard title="Training Accuracy" value={metrics.train_acc != null ? `${metrics.train_acc.toFixed(2)}%` : '--'} />
             <MetricCard title="Validation Accuracy" value={metrics.val_acc != null ? `${metrics.val_acc.toFixed(2)}%` : '--'} />
             <MetricCard title="Training Loss" value={metrics.train_loss != null ? metrics.train_loss.toFixed(4) : '--'} />
             <MetricCard title="Validation Loss" value={metrics.val_loss != null ? metrics.val_loss.toFixed(4) : '--'} />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <LineChart data={accuracyData} color="#10b981" label="Accuracy vs Epoch" />
-            <LineChart data={lossData} color="#ef4444" label="Loss vs Epoch" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+            <div className="min-w-0">
+              <LineChart data={accuracyData} color="#10b981" label="Accuracy vs Epoch" />
+            </div>
+            <div className="min-w-0">
+              <LineChart data={lossData} color="#ef4444" label="Loss vs Epoch" />
+            </div>
           </div>
         </div>
 
