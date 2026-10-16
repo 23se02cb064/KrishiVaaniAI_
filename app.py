@@ -2027,7 +2027,13 @@ def export_predictions_csv():
 def prediction_analytics():
     db = SessionLocal()
     try:
-        records = db.query(PredictionRecord).order_by(PredictionRecord.created_at.asc()).all()
+        cutoff = datetime.utcnow() - timedelta(days=90)
+        records = (
+            db.query(PredictionRecord)
+            .filter(PredictionRecord.created_at >= cutoff)
+            .order_by(PredictionRecord.created_at.asc())
+            .all()
+        )
         labels = []
         counts = []
         by_day = {}
